@@ -1,0 +1,9 @@
+[org/gnome/desktop/interface]
+color-scheme='prefer-dark'
+gtk-theme='PiXonyx'
+icon-theme='PiXtrix'
+
+[org/gnome/desktop/background]
+color-shading-type='solid'
+primary-color='#202224'
+secondary-color='#202224'

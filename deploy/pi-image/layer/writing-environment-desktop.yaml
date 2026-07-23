@@ -1,0 +1,85 @@
+# METABEGIN
+# X-Env-Layer-Name: writing-environment-desktop
+# X-Env-Layer-Version: 0.3.0
+# X-Env-Layer-Category: application
+# X-Env-Layer-Desc: Minimal Labwc writing appliance with Writing Environment.
+# X-Env-Layer-Requires: device-user-admin,systemd-min
+# METAEND
+---
+mmdebstrap:
+  packages:
+    - bluez
+    - blueman
+    - ca-certificates
+    - curl
+    - file
+    - fonts-liberation2
+    - fonts-nunito-sans
+    - hunspell-en-us
+    - hunspell-pt-br
+    - libayatana-appindicator3-1
+    - librsvg2-2
+    - libwebkit2gtk-4.1-0
+    - libxdo3
+    - locales
+    - pi-bluetooth
+    - pipanel
+    - pixtrix-icons
+    - pixtrix-theme
+    - raindrop
+    - rasputin
+    - rc-gui
+    - rpd-wayland-core
+    - rpcc
+    - surf
+    - unzip
+    - util-linux
+    - wfplug-bluetooth
+    - wlr-randr
+    - xdg-utils
+  customize-hooks:
+    - tar --no-same-owner -xpf writing-environment-rootfs.tar -C "$1"
+    - |-
+      set -eu
+      localsend_deb=/usr/local/share/writing-environment/packages/localsend-arm64.deb
+      test -f "$1$localsend_deb"
+      chroot "$1" apt-get install -y "$localsend_deb"
+      rm -f "$1$localsend_deb"
+      rmdir "$1/usr/local/share/writing-environment/packages"
+    - |-
+      set -eu
+      sed -i 's#<name>PiXtrix</name>#<name>PiXonyx</name>#' "$1/etc/xdg/labwc/rc.xml"
+      if ! grep -q 'writing-environment-panel-menu' "$1/etc/xdg/labwc/rc.xml"; then
+        sed -i '/<\/keyboard>/i\
+        <!-- writing-environment-panel-menu -->\
+        <keybind key="C-Tab">\
+          <action name="Execute" command="writing-environment-panel-menu" />\
+        </keybind>' "$1/etc/xdg/labwc/rc.xml"
+      fi
+      if ! grep -q 'writing-environment-settings' "$1/etc/xdg/labwc/rc.xml"; then
+        sed -i '/<\/keyboard>/i\
+        <!-- writing-environment-settings -->\
+        <keybind key="C-W-s">\
+          <action name="Execute" command="rpcc" />\
+        </keybind>' "$1/etc/xdg/labwc/rc.xml"
+      fi
+      sed -i "s/gtk-theme='PiXtrix'/gtk-theme='PiXonyx'/" "$1/usr/share/glib-2.0/schemas/10_rpd-wayland-core.gschema.override"
+      chroot "$1" glib-compile-schemas /usr/share/glib-2.0/schemas
+      chroot "$1" sh -c 'command -v dconf >/dev/null 2>&1 && dconf update || true'
+      locale_input="${IGconf_locale_default%%.*}"
+      chroot "$1" localedef -i "$locale_input" -f UTF-8 "$IGconf_locale_default"
+      printf 'LANG=%s\n' "$IGconf_locale_default" > "$1/etc/locale.conf"
+      printf 'LANG=%s\n' "$IGconf_locale_default" > "$1/etc/default/locale"
+    - |-
+      set -eu
+      user="$IGconf_device_user1"
+      home="$(chroot "$1" getent passwd "$user" | cut -d: -f6)"
+      test -n "$home"
+      cp -a "$1/etc/skel/." "$1$home/"
+      chroot "$1" chown -R "$user:$user" "$home"
+      mkdir -p "$1$home/Writing"
+      chroot "$1" chown "$user:$user" "$home/Writing"
+      sed -i "s/@@WRITER_USER@@/$user/g" "$1/etc/lightdm/lightdm.conf.d/90-writing-environment.conf"
+    - $BDEBSTRAP_HOOKS/disable-units "$1" systemd-networkd iwd ssh
+    - $BDEBSTRAP_HOOKS/enable-units "$1" NetworkManager bluetooth hciuart lightdm writing-environment-expand-rootfs
+    - ln -sfn /lib/systemd/system/graphical.target "$1/etc/systemd/system/default.target"

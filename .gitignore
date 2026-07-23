@@ -1,0 +1,14 @@
+node_modules/
+dist/
+src-tauri/target/
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+.e2e-library/
+.e2e-project/
+reports/pi/*.txt
+artifacts/
+writing-environment.key
+writing-environment.key.pub

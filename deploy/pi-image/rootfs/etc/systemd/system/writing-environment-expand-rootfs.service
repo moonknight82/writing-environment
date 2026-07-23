@@ -1,0 +1,12 @@
+[Unit]
+Description=Expand the Writing Environment root filesystem on first boot
+ConditionPathExists=!/var/lib/writing-environment/rootfs-expanded
+After=local-fs.target
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/writing-environment-expand-rootfs
+
+[Install]
+WantedBy=multi-user.target

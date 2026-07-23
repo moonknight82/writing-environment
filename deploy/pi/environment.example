@@ -1,0 +1,11 @@
+# Optional Raspberry Pi session overrides.
+#
+# The default starts Writing Environment in borderless maximized presentation
+# mode. Press Ctrl+Tab to show or hide the system panel, and Ctrl+Super+S to
+# open Control Centre. Set this to 0 for a normal resizable window.
+# WRITING_ENVIRONMENT_APPLIANCE=0
+#
+# The Raspberry Pi launcher disables WebKitGTK's DMA-BUF renderer by default to
+# avoid corrupted first frames under Labwc/Wayland. A future WebKitGTK or Mesa
+# update may fix the hardware path; set this to 0 only after testing clean starts.
+# WEBKIT_DISABLE_DMABUF_RENDERER=0

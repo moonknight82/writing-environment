@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly app_binary="/opt/writing-environment/writing-environment"
+readonly user_config="${XDG_CONFIG_HOME:-$HOME/.config}/writing-environment/environment"
+
+if [[ -r "$user_config" ]]; then
+  # shellcheck source=/dev/null
+  source "$user_config"
+fi
+
+if [[ ! -x "$app_binary" ]]; then
+  printf 'Writing Environment is not installed at %s\n' "$app_binary" >&2
+  exit 1
+fi
+
+runtime_base="${XDG_RUNTIME_DIR:-/tmp/writing-environment-$UID}"
+if [[ ! -d "$runtime_base" ]]; then
+  mkdir -p "$runtime_base"
+  chmod 700 "$runtime_base"
+fi
+
+readonly lock_file="$runtime_base/writing-environment.lock"
+exec 9>"$lock_file"
+if ! flock -n 9; then
+  exit 0
+fi
+
+exec "$app_binary" "$@"

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly state_dir="/var/lib/writing-environment"
+readonly marker="$state_dir/rootfs-expanded"
+mkdir -p "$state_dir"
+
+if raspi-config nonint get_can_expand >/dev/null 2>&1; then
+  raspi-config nonint do_expand_rootfs
+  touch "$marker"
+  systemctl disable writing-environment-expand-rootfs.service
+  systemctl --no-block reboot
+else
+  touch "$marker"
+  systemctl disable writing-environment-expand-rootfs.service
+fi

@@ -1,0 +1,4 @@
+# Labwc also runs the system autostart file. Keep only appliance-specific
+# commands here so the panel, desktop, and display helper are not launched twice.
+/usr/local/bin/writing-environment-panel-menu --hide &
+/usr/local/bin/writing-environment &

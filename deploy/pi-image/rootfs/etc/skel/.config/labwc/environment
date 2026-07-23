@@ -1,0 +1,2 @@
+# Use the minimal WebKit browser for rclone OAuth and ordinary web links.
+BROWSER=/usr/bin/surf

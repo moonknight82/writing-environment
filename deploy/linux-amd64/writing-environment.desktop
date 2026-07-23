@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Writing Environment
+GenericName=Markdown Writing App
+Comment=A distraction-free, local-first writing environment
+Exec=/usr/local/bin/writing-environment
+Icon=writing-environment
+Terminal=false
+Categories=Office;WordProcessor;Utility;
+StartupNotify=true
+StartupWMClass=app.writingenvironment.desktop
+Keywords=writing;markdown;editor;manuscript;
+X-Writing-Environment-Managed=true

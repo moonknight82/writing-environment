@@ -1,0 +1,8 @@
+# Optional Linux desktop overrides.
+#
+# The normal amd64 desktop port opens as a regular resizable window. Uncomment
+# this to ask Writing Environment to start in borderless presentation mode.
+# WRITING_ENVIRONMENT_APPLIANCE=1
+#
+# Do not add WebKit renderer flags unless testing on your specific machine
+# proves one is necessary.

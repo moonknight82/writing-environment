@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -x /usr/bin/writing-environment ]]; then
+  readonly app_binary="/usr/bin/writing-environment"
+else
+  # Compatibility fallback for appliance images made before signed Debian
+  # application updates were introduced.
+  readonly app_binary="/opt/writing-environment/writing-environment"
+fi
+readonly user_config="${XDG_CONFIG_HOME:-$HOME/.config}/writing-environment/environment"
+
+if [[ -r "$user_config" ]]; then
+  # This file is owned by the current user and contains optional shell-style
+  # environment overrides. The installer creates a comment-only template.
+  # shellcheck source=/dev/null
+  source "$user_config"
+fi
+
+export WRITING_ENVIRONMENT_APPLIANCE="${WRITING_ENVIRONMENT_APPLIANCE:-1}"
+# WebKitGTK's DMA-BUF path can present a corrupted first frame on Raspberry Pi
+# Wayland sessions. Prefer its shared-memory renderer unless the user explicitly
+# opts back in after verifying a newer graphics stack.
+export WEBKIT_DISABLE_DMABUF_RENDERER="${WEBKIT_DISABLE_DMABUF_RENDERER:-1}"
+
+if [[ ! -x "$app_binary" ]]; then
+  printf 'Writing Environment is not installed.\n' >&2
+  exit 1
+fi
+
+runtime_base="${XDG_RUNTIME_DIR:-/tmp/writing-environment-$UID}"
+if [[ ! -d "$runtime_base" ]]; then
+  mkdir -p "$runtime_base"
+  chmod 700 "$runtime_base"
+fi
+
+readonly lock_file="$runtime_base/writing-environment.lock"
+exec 9>"$lock_file"
+if ! flock -n 9; then
+  exit 0
+fi
+
+exec "$app_binary" "$@"

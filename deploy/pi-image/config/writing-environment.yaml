@@ -1,0 +1,26 @@
+include:
+  file: trixie-minbase.yaml
+
+device:
+  layer: rpi4
+  hostname: writing-environment
+  user1: writer
+  user1sudo: passwd
+
+image:
+  layer: image-rpios
+  name: writing-environment-pi4
+  boot_part_size: 200%
+  root_part_size: 200%
+
+locale:
+  default: en_US.UTF-8
+  keyboard_keymap: us
+  keyboard_layout: English (US)
+  timezone: America/Sao_Paulo
+
+ieee80211:
+  regdom: BR
+
+layer:
+  writer: writing-environment-desktop

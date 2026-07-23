@@ -1,0 +1,116 @@
+name: Publish signed desktop release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  verify-version:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify release tag and application version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          test "${GITHUB_REF_NAME}" = "v${version}"
+
+  publish:
+    needs: verify-version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin --bundles app
+            rust_targets: aarch64-apple-darwin
+            linux: false
+            raspberry_pi: false
+            apple_identity: "-"
+            macos: true
+          - platform: ubuntu-22.04
+            args: --bundles deb
+            rust_targets: ""
+            linux: true
+            raspberry_pi: false
+            apple_identity: ""
+            macos: false
+          - platform: ubuntu-22.04-arm
+            args: --bundles deb
+            rust_targets: ""
+            linux: true
+            raspberry_pi: true
+            apple_identity: ""
+            macos: false
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux build dependencies
+        if: matrix.linux
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev patchelf xdg-utils file
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.1
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+      - run: pnpm install --frozen-lockfile
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          APPLE_SIGNING_IDENTITY: ${{ matrix.apple_identity }}
+        with:
+          tagName: v__VERSION__
+          releaseName: Writing Environment v__VERSION__
+          releaseBody: |
+            Signed desktop release for macOS Apple Silicon, Linux amd64, and Raspberry Pi ARM64.
+
+            This is a personal project under active development. Back up important writing and review the release notes before updating.
+          releaseDraft: false
+          prerelease: false
+          uploadUpdaterJson: true
+          uploadUpdaterSignatures: true
+          args: ${{ matrix.args }}
+      - name: Package the macOS manual bootstrap app
+        if: matrix.macos
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          app="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Writing Environment.app"
+          archive="Writing-Environment-macOS-${version}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "$archive"
+          shasum -a 256 "$archive" >"$archive.sha256"
+          gh release upload "v${version}" "$archive" "$archive.sha256" --clobber
+      - name: Package the Raspberry Pi manual bootstrap kit
+        if: matrix.raspberry_pi
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          output="artifacts/pi-arm64/github-${GITHUB_RUN_NUMBER}"
+          scripts/pi/package-artifact.sh "$output" "github-${GITHUB_RUN_NUMBER}"
+          archive="$(find "$output" -maxdepth 1 -type f -name '*.tar.gz' -print -quit)"
+          pnpm tauri signer sign "$archive"
+          gh release upload "v${version}" "$archive" "$archive.sha256" "$archive.sig" --clobber
