@@ -2104,7 +2104,8 @@ textarea::selection {
   font-weight: 650;
 }
 
-.sheet-dialog > input {
+.sheet-dialog > input,
+.sheet-dialog > select {
   width: 100%;
   min-height: 38px;
   padding: 0 11px;
@@ -2117,7 +2118,8 @@ textarea::selection {
   font-size: 12px;
 }
 
-.sheet-dialog > input:focus-visible {
+.sheet-dialog > input:focus-visible,
+.sheet-dialog > select:focus-visible {
   border-color: var(--accent);
   outline: 1px solid var(--accent);
 }

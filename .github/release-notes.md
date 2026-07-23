@@ -1,6 +1,6 @@
-Begins the unified-library milestone with a persistent project registry and real nested folder navigation. The active project now expands directly in the Projects sidebar, and folders such as `Research/Locations` retain their hierarchy instead of being flattened.
+Fixes project switching so every open project remains in the sidebar until it is explicitly closed. Each project remembers its last selected sheet, and the Move dialog can transfer a sheet to a nested folder in any other open project.
 
-Selecting a parent folder includes sheets from its descendants. Creating and moving sheets now accepts safe nested project paths while rejecting paths that could escape the project. Existing projects, Markdown files, sync profiles, History, and Trash remain compatible.
+Cross-project moves write and verify a durable destination copy before removing the source. A Markdown file containing invalid UTF-8 bytes no longer prevents its entire project from opening: the application leaves that file untouched, skips it, and names it in a clear warning so it can be converted or restored safely.
 
 Signed desktop release for macOS Apple Silicon, Linux amd64, and Raspberry Pi ARM64.
 

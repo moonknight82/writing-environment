@@ -1,6 +1,6 @@
 [package]
 name = "writing-environment"
-version = "0.4.0"
+version = "0.4.1"
 description = "A distraction-free, local-first Markdown writing environment"
 authors = ["Writing Environment contributors"]
 edition = "2021"

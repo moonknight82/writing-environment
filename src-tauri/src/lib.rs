@@ -105,6 +105,12 @@ struct LibrarySnapshot {
     name: String,
     path: String,
     sheets: Vec<SheetSummary>,
+    warnings: Vec<String>,
+}
+
+struct LibraryScan {
+    sheets: Vec<SheetSummary>,
+    warnings: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -144,17 +150,17 @@ fn open_library(app: tauri::AppHandle, path: String) -> Result<LibrarySnapshot, 
         return Err("The selected library is not a folder.".into());
     }
 
-    let sheets = match search_index_path(&app, &root)
+    let scan = match search_index_path(&app, &root)
         .and_then(|index_path| search_index::synchronize(&index_path, &root))
     {
-        Ok(sheets) => sheets,
+        Ok(scan) => scan,
         Err(error) => {
             eprintln!("Search index unavailable; using a direct library scan: {error}");
             scan_library_sheets(&root)?
         }
     };
 
-    library_snapshot(root, sheets)
+    library_snapshot(root, scan)
 }
 
 #[cfg(test)]
@@ -163,11 +169,11 @@ fn open_library_unindexed(path: &str) -> Result<LibrarySnapshot, String> {
     if !root.is_dir() {
         return Err("The selected library is not a folder.".into());
     }
-    let sheets = scan_library_sheets(&root)?;
-    library_snapshot(root, sheets)
+    let scan = scan_library_sheets(&root)?;
+    library_snapshot(root, scan)
 }
 
-fn library_snapshot(root: PathBuf, sheets: Vec<SheetSummary>) -> Result<LibrarySnapshot, String> {
+fn library_snapshot(root: PathBuf, scan: LibraryScan) -> Result<LibrarySnapshot, String> {
     let name = root
         .file_name()
         .and_then(|name| name.to_str())
@@ -177,12 +183,14 @@ fn library_snapshot(root: PathBuf, sheets: Vec<SheetSummary>) -> Result<LibraryS
     Ok(LibrarySnapshot {
         name,
         path: root.to_string_lossy().into_owned(),
-        sheets,
+        sheets: scan.sheets,
+        warnings: scan.warnings,
     })
 }
 
-fn scan_library_sheets(root: &Path) -> Result<Vec<SheetSummary>, String> {
+fn scan_library_sheets(root: &Path) -> Result<LibraryScan, String> {
     let mut sheets = Vec::new();
+    let mut warnings = Vec::new();
     for entry in WalkDir::new(root).follow_links(false) {
         let entry = entry.map_err(|error| format!("Cannot scan library: {error}"))?;
         let file_path = entry.path();
@@ -194,14 +202,20 @@ fn scan_library_sheets(root: &Path) -> Result<Vec<SheetSummary>, String> {
         let relative = file_path
             .strip_prefix(root)
             .map_err(|_| "A sheet resolved outside the library.".to_string())?;
-        let content = fs::read_to_string(file_path)
-            .map_err(|error| format!("Cannot read {}: {error}", relative.display()))?;
+        let content = match fs::read_to_string(file_path) {
+            Ok(content) => content,
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+                warnings.push(invalid_utf8_warning(relative));
+                continue;
+            }
+            Err(error) => return Err(format!("Cannot read {}: {error}", relative.display())),
+        };
 
         sheets.push(summarize_sheet(file_path, relative, &content));
     }
 
     sheets.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
-    Ok(sheets)
+    Ok(LibraryScan { sheets, warnings })
 }
 
 fn summarize_sheet(file_path: &Path, relative: &Path, content: &str) -> SheetSummary {
@@ -219,7 +233,7 @@ fn summarize_sheet(file_path: &Path, relative: &Path, content: &str) -> SheetSum
 #[tauri::command]
 fn read_sheet(root: String, relative_path: String) -> Result<String, String> {
     let target = resolve_existing_sheet(&root, &relative_path)?;
-    fs::read_to_string(&target).map_err(|error| format!("Cannot read sheet: {error}"))
+    read_markdown_utf8(&target, Path::new(&relative_path))
 }
 
 #[tauri::command]
@@ -427,6 +441,78 @@ fn move_sheet(
         &relative_path,
         &summary.relative_path,
     )?;
+    Ok(summary)
+}
+
+#[tauri::command]
+fn move_sheet_to_project(
+    app: tauri::AppHandle,
+    source_root: String,
+    relative_path: String,
+    destination_root: String,
+    group: String,
+) -> Result<SheetSummary, String> {
+    let canonical_source_root = canonical_library_root(&source_root)?;
+    let canonical_destination_root = canonical_library_root(&destination_root)?;
+    if canonical_source_root == canonical_destination_root {
+        return move_sheet(app, source_root, relative_path, group);
+    }
+
+    let summary = move_sheet_between_projects_on_disk(
+        &source_root,
+        &relative_path,
+        &destination_root,
+        &group,
+    )?;
+    if let Err(error) = migrate_revision_history_between(
+        &app,
+        &canonical_source_root,
+        &relative_path,
+        &canonical_destination_root,
+        &summary.relative_path,
+    ) {
+        eprintln!("Moved the sheet, but could not carry its History: {error}");
+    }
+    Ok(summary)
+}
+
+fn move_sheet_between_projects_on_disk(
+    source_root: &str,
+    relative_path: &str,
+    destination_root: &str,
+    group: &str,
+) -> Result<SheetSummary, String> {
+    let canonical_destination_root = canonical_library_root(destination_root)?;
+    let source = resolve_existing_sheet(source_root, relative_path)?;
+    let parent = group_directory(&canonical_destination_root, group)?;
+    fs::create_dir_all(&parent)
+        .map_err(|error| format!("Cannot create destination folder: {error}"))?;
+    let stem = source
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("untitled");
+    let target = unique_markdown_path(&parent, stem);
+    let content = fs::read(&source)
+        .map_err(|error| format!("Cannot read sheet before moving it: {error}"))?;
+    std::str::from_utf8(&content).map_err(|_| invalid_utf8_warning(Path::new(relative_path)))?;
+
+    create_new_file(&target, &content)?;
+    let copied = fs::read(&target)
+        .map_err(|error| format!("Cannot verify the destination sheet: {error}"))?;
+    if copied != content {
+        return Err(
+            "The destination copy did not verify; the original sheet was left untouched.".into(),
+        );
+    }
+    let summary = summarize_existing(&canonical_destination_root, &target)?;
+
+    fs::remove_file(&source).map_err(|error| {
+        format!("The destination copy is safe, but the original could not be removed: {error}")
+    })?;
+    if let Err(error) = sync_parent(&source) {
+        eprintln!("Moved the sheet, but could not flush the source folder: {error}");
+    }
+
     Ok(summary)
 }
 
@@ -672,8 +758,11 @@ fn search_library_by_scan(root: &Path, query: &str) -> Result<Vec<SheetSummary>,
         if !entry.file_type().is_file() || !is_markdown(entry.path()) {
             continue;
         }
-        let content = fs::read_to_string(entry.path())
-            .map_err(|error| format!("Cannot search {}: {error}", entry.path().display()))?;
+        let content = match fs::read_to_string(entry.path()) {
+            Ok(content) => content,
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidData => continue,
+            Err(error) => return Err(format!("Cannot search {}: {error}", entry.path().display())),
+        };
         let searchable =
             format!("{}\n{}", sheet_title(&content, entry.path()), content).to_lowercase();
         if !terms.iter().all(|term| searchable.contains(term)) {
@@ -974,14 +1063,24 @@ fn migrate_revision_history(
     old_relative_path: &str,
     new_relative_path: &str,
 ) -> Result<(), String> {
-    if old_relative_path == new_relative_path {
+    migrate_revision_history_between(app, root, old_relative_path, root, new_relative_path)
+}
+
+fn migrate_revision_history_between(
+    app: &tauri::AppHandle,
+    old_root: &Path,
+    old_relative_path: &str,
+    new_root: &Path,
+    new_relative_path: &str,
+) -> Result<(), String> {
+    if old_root == new_root && old_relative_path == new_relative_path {
         return Ok(());
     }
-    let old_dir = revision_dir_for(app, root, old_relative_path)?;
+    let old_dir = revision_dir_for(app, old_root, old_relative_path)?;
     if !old_dir.exists() {
         return Ok(());
     }
-    let new_dir = revision_dir_for(app, root, new_relative_path)?;
+    let new_dir = revision_dir_for(app, new_root, new_relative_path)?;
     if !new_dir.exists() {
         fs::rename(&old_dir, &new_dir)
             .map_err(|error| format!("Cannot carry History to the renamed sheet: {error}"))?;
@@ -1174,6 +1273,23 @@ fn is_markdown(path: &Path) -> bool {
         .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
 }
 
+fn invalid_utf8_warning(relative: &Path) -> String {
+    format!(
+        "{} is not UTF-8. Convert or restore this file before editing it.",
+        relative.display()
+    )
+}
+
+fn read_markdown_utf8(target: &Path, relative: &Path) -> Result<String, String> {
+    match fs::read_to_string(target) {
+        Ok(content) => Ok(content),
+        Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+            Err(invalid_utf8_warning(relative))
+        }
+        Err(error) => Err(format!("Cannot read {}: {error}", relative.display())),
+    }
+}
+
 fn markdown_body(content: &str) -> &str {
     if !content.starts_with("---\n") && !content.starts_with("---\r\n") {
         return content;
@@ -1342,6 +1458,7 @@ pub fn run() {
             rename_sheet,
             duplicate_sheet,
             move_sheet,
+            move_sheet_to_project,
             trash_sheet,
             list_trash,
             empty_trash,
@@ -1404,6 +1521,27 @@ mod tests {
         assert_eq!(library.sheets[0].relative_path, "Draft/arrival.md");
         assert_eq!(library.sheets[0].excerpt, "First paragraph.");
         assert_eq!(library.sheets[0].created_at, "2026-07-18T17:20:00+00:00");
+        assert!(library.warnings.is_empty());
+    }
+
+    #[test]
+    fn invalid_utf8_sheet_does_not_block_the_project() {
+        let root = tempfile::tempdir().expect("temporary library");
+        let draft = root.path().join("Draft");
+        fs::create_dir(&draft).expect("draft folder");
+        fs::write(draft.join("safe.md"), "# Safe\n\nReadable manuscript.").expect("safe sheet");
+        fs::write(draft.join("legacy.md"), [0xff, 0xfe, 0x00, 0x61]).expect("invalid sheet");
+
+        let root_string = root.path().to_string_lossy().into_owned();
+        let library = open_library_unindexed(&root_string).expect("scan remaining sheets");
+
+        assert_eq!(library.sheets.len(), 1);
+        assert_eq!(library.sheets[0].relative_path, "Draft/safe.md");
+        assert_eq!(library.warnings.len(), 1);
+        assert!(library.warnings[0].contains("Draft/legacy.md is not UTF-8"));
+        let error = read_sheet(root_string, "Draft/legacy.md".into())
+            .expect_err("invalid sheet should explain its encoding");
+        assert!(error.contains("Convert or restore this file"));
     }
 
     #[test]
@@ -1610,6 +1748,32 @@ mod tests {
             .expect("move between nested folders");
         assert_eq!(moved.relative_path, "Draft/Chapter One/harbor-road.md");
         assert!(root.path().join(&moved.relative_path).is_file());
+    }
+
+    #[test]
+    fn sheet_moves_safely_between_open_project_folders() {
+        let source_root = tempfile::tempdir().expect("source project");
+        let destination_root = tempfile::tempdir().expect("destination project");
+        let source_draft = source_root.path().join("Draft");
+        fs::create_dir(&source_draft).expect("source draft folder");
+        let source = source_draft.join("chapter.md");
+        fs::write(&source, "# Chapter\n\nMove this complete manuscript.").expect("source sheet");
+
+        let moved = move_sheet_between_projects_on_disk(
+            &source_root.path().to_string_lossy(),
+            "Draft/chapter.md",
+            &destination_root.path().to_string_lossy(),
+            "Novel/Part One",
+        )
+        .expect("cross-project move");
+
+        assert_eq!(moved.relative_path, "Novel/Part One/chapter.md");
+        assert!(!source.exists());
+        assert_eq!(
+            fs::read_to_string(destination_root.path().join(&moved.relative_path))
+                .expect("verified destination"),
+            "# Chapter\n\nMove this complete manuscript."
+        );
     }
 
     #[test]

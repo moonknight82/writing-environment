@@ -25,10 +25,12 @@ Trash
 ```
 
 - **Inbox** and **Trash** are universal, static destinations.
-- Favorited projects remain visible when closed.
-- The active project remains visible even when it is not favorited.
+- Open projects remain visible until the writer explicitly closes them.
+- Favorited projects remain visible as shortcuts when closed.
+- The active project remains visible even when it is not favorited, and each open project remembers its last selected sheet.
 - Closing a project unloads its sheets, watcher, search context, and active sync state. It never deletes or moves the project folder.
 - Right-clicking a project offers Open/Close and Add/Remove from Favorites.
+- Moving a sheet can target a nested folder in any open project. The verified destination copy is made durable before the source is removed.
 - Project folders are shown as a nested tree using their real relative paths. The current one-level group summary will not flatten deeper folders.
 
 Until Inbox is implemented, a desktop session with no active project shows a genuinely empty workspace. It must never fall back to the editable browser-prototype library.

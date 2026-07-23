@@ -46,6 +46,8 @@ Version 0.3.2 corrects desktop workspace restoration after updating. With no pro
 
 Version 0.4.0 begins the unified-library milestone. Opened projects are retained in a persistent registry, the active project expands into its real nested folder tree, parent folders include descendant sheets, and sheet creation or moves can target safe nested paths such as `Research/Locations`.
 
+Version 0.4.1 makes open projects explicit and durable. Switching projects no longer removes the previous project from the sidebar, each project remembers its last sheet, and **Move to another project or folder** can transfer a sheet safely between any two open projects. A Markdown file with invalid UTF-8 bytes is skipped with a precise warning instead of preventing the rest of its project from opening; the unreadable file is never rewritten or deleted.
+
 Update artifacts and `latest.json` are published through [GitHub Releases](https://github.com/moonknight82/writing-environment/releases). Every application update is verified with Tauri's embedded public signing key before installation. The private key is held only in the repository's GitHub Actions secrets. macOS uses a signed Tauri application archive; Linux amd64 and Raspberry Pi use signed Debian packages and request system authorization when installation begins.
 
 Application updates do not modify Raspberry Pi OS, desktop settings, rclone configuration, projects, or recovery data. Appliance-level changes remain separate, deliberate updates or full-image releases.
@@ -147,7 +149,7 @@ Release bundles require the updater signing key through `TAURI_SIGNING_PRIVATE_K
 
 ## Publishing a release
 
-The public release workflow builds macOS Apple Silicon, Linux amd64, and Raspberry Pi ARM64 packages. To publish, update the version consistently in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`, commit it, then push the matching tag—for example `v0.4.0`. GitHub Actions tests, builds, signs, and publishes the packages and updater manifest. See [Release process](docs/releases.md) for signing-key recovery and release checks.
+The public release workflow builds macOS Apple Silicon, Linux amd64, and Raspberry Pi ARM64 packages. To publish, update the version consistently in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`, commit it, then push the matching tag—for example `v0.4.1`. GitHub Actions tests, builds, signs, and publishes the packages and updater manifest. See [Release process](docs/releases.md) for signing-key recovery and release checks.
 
 Native system spelling and grammar checking are enabled by default and can be changed in the Writer (`Aa`) panel. Linux builds initialize WebKitGTK with the bundled English (US) and Brazilian Portuguese Hunspell dictionaries; macOS builds enable WebKit's continuous spelling and grammar services. Writing Focus preserves the operating system's native underlines. Automatic correction remains off by default so the operating system cannot silently rewrite manuscript text unless the writer opts in.
 

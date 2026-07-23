@@ -15,6 +15,7 @@
     listSheetRevisions,
     listLibraryTrash,
     moveLibrarySheet,
+    moveLibrarySheetToProject,
     openLibraryPath,
     preserveLocalConflict,
     readLibrarySheet,
@@ -51,7 +52,9 @@
     name: string;
     path: string;
     pinned: boolean;
+    open: boolean;
     lastOpened: number;
+    lastSheetPath: string | null;
   }
 
   type WritingFocusMode = "off" | "paragraph" | "sentence";
@@ -205,7 +208,9 @@ It passed the abandoned signal house before descending between black pines to th
     name: "Prototype Library",
     path: prototypeProjectPath,
     pinned: false,
+    open: true,
     lastOpened: 0,
+    lastSheetPath: prototypeSheets[0].relativePath,
   }];
   let sortedProjects: ProjectBookmark[] = [];
   let sidebarProjects: ProjectBookmark[] = [];
@@ -223,6 +228,7 @@ It passed the abandoned signal house before descending between black pines to th
   let dialogSheet: SheetSummary | null = null;
   let dialogTitle = "";
   let dialogGroup = "Draft";
+  let dialogProjectPath = "";
   let dialogError = "";
   let emptyTrashConfirmVisible = false;
   let emptyTrashError = "";
@@ -265,7 +271,7 @@ It passed the abandoned signal house before descending between black pines to th
   let externalConflictPath: string | null = null;
   let externalDiskContent: string | null = null;
   let resolvingExternalConflict = false;
-  let appVersion = "0.4.0";
+  let appVersion = "0.4.1";
   let automaticUpdateChecks = true;
   let updateVisible = false;
   let updateChecking = false;
@@ -289,7 +295,7 @@ It passed the abandoned signal house before descending between black pines to th
   );
   $: activeProjectPath = libraryPath ?? (!desktopMode ? prototypeProjectPath : null);
   $: sidebarProjects = sortedProjects.filter(
-    (project) => project.pinned || project.path === activeProjectPath,
+    (project) => project.open || project.pinned || project.path === activeProjectPath,
   );
   $: focusSegments = buildFocusSegments(content, cursorPosition, writingFocusMode);
   $: syncNeedsInitialization = !syncPreference.initialized
@@ -941,6 +947,7 @@ It passed the abandoned signal house before descending between black pines to th
       dirty = false;
       saveStatus = "Saved locally";
       errorMessage = "";
+      rememberActiveProjectSheet(sheet.relativePath);
       rememberLastWorkspace();
     } catch (error) {
       saveStatus = "Open failed";
@@ -983,7 +990,7 @@ It passed the abandoned signal house before descending between black pines to th
     errorMessage = "";
 
     try {
-      await activateLibrary(await openLibraryPath(project.path));
+      await activateLibrary(await openLibraryPath(project.path), project.lastSheetPath);
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : String(error);
     } finally {
@@ -1005,9 +1012,22 @@ It passed the abandoned signal house before descending between black pines to th
     sortMenuVisible = false;
   }
 
-  async function closeActiveProject(): Promise<void> {
-    if (!libraryPath || syncRunning || loadingLibrary) return;
-    if (dirty && !(await persistCurrentSheet())) return;
+  async function closeProject(project: ProjectBookmark): Promise<void> {
+    if (!project.open || loadingLibrary) return;
+    const isActive = project.path === libraryPath;
+    if (isActive && syncRunning) return;
+    if (isActive && dirty && !(await persistCurrentSheet())) return;
+
+    const nextProject = [...projects]
+      .filter((candidate) => candidate.open && candidate.path !== project.path)
+      .sort((left, right) => right.lastOpened - left.lastOpened)[0];
+
+    projects = projects.map((candidate) =>
+      candidate.path === project.path ? { ...candidate, open: false } : candidate,
+    );
+    saveProjects();
+    projectMenuPath = null;
+    if (!isActive) return;
 
     if (syncTimer) clearTimeout(syncTimer);
     syncTimer = undefined;
@@ -1019,9 +1039,24 @@ It passed the abandoned signal house before descending between black pines to th
       }
     }
 
-    projectMenuPath = null;
     localStorage.removeItem("writing-environment.last-workspace");
-    clearWorkspace();
+    if (!nextProject) {
+      clearWorkspace();
+      return;
+    }
+
+    loadingLibrary = true;
+    try {
+      await activateLibrary(
+        await openLibraryPath(nextProject.path),
+        nextProject.lastSheetPath,
+      );
+    } catch (error) {
+      clearWorkspace();
+      errorMessage = `Closed ${project.name}, but could not open ${nextProject.name}: ${errorText(error)}`;
+    } finally {
+      loadingLibrary = false;
+    }
   }
 
   function clearWorkspace(): void {
@@ -1064,7 +1099,7 @@ It passed the abandoned signal house before descending between black pines to th
     loadProjectSyncPreference(selected.path, selected.name);
     sheets = selected.sheets;
     folders = folderSummaries(selected.sheets);
-    rememberProject(selected);
+    rememberProject(selected, firstSheet?.relativePath ?? null);
 
     if (firstSheet) {
       activeGroup = sheetFolder(firstSheet);
@@ -1087,6 +1122,7 @@ It passed the abandoned signal house before descending between black pines to th
     saveStatus = "Saved locally";
     await refreshTrash();
     rememberLastWorkspace();
+    errorMessage = libraryWarningMessage(selected);
     await watchActiveLibrary(selected.path);
     scheduleAutomaticSync(3000);
   }
@@ -1356,7 +1392,6 @@ It passed the abandoned signal house before descending between black pines to th
     loadingLibrary = true;
     try {
       await activateLibrary(await openLibraryPath(workspace.projectPath), workspace.sheetPath);
-      errorMessage = "";
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : String(error);
     } finally {
@@ -1367,8 +1402,12 @@ It passed the abandoned signal house before descending between black pines to th
   function setReopenLastWorkspace(enabled: boolean): void {
     reopenLastWorkspace = enabled;
     localStorage.setItem("writing-environment.reopen-last-workspace", String(enabled));
-    if (enabled) rememberLastWorkspace();
-    else localStorage.removeItem("writing-environment.last-workspace");
+    if (enabled) {
+      rememberLastWorkspace();
+    } else {
+      localStorage.removeItem("writing-environment.last-workspace");
+      saveProjects();
+    }
   }
 
   function rememberLastWorkspace(): void {
@@ -1452,6 +1491,7 @@ It passed the abandoned signal house before descending between black pines to th
       : activeGroup !== "All Sheets" && activeGroup !== "Trash"
         ? activeGroup
         : folders[0]?.path ?? "Draft";
+    dialogProjectPath = libraryPath;
     dialogError = "";
   }
 
@@ -1485,10 +1525,26 @@ It passed the abandoned signal house before descending between black pines to th
         dirty = false;
         await reloadLibrary(wasActive ? renamed.relativePath : activeSheetPath, wasActive);
       } else if (sheetDialogMode === "move" && dialogSheet) {
-        const moved = await moveLibrarySheet(libraryPath, dialogSheet.relativePath, dialogGroup);
+        const sourceProjectPath = libraryPath;
+        const destinationProjectPath = dialogProjectPath || sourceProjectPath;
+        const moved = destinationProjectPath === sourceProjectPath
+          ? await moveLibrarySheet(sourceProjectPath, dialogSheet.relativePath, dialogGroup)
+          : await moveLibrarySheetToProject(
+            sourceProjectPath,
+            dialogSheet.relativePath,
+            destinationProjectPath,
+            dialogGroup,
+          );
         const wasActive = activeSheetPath === dialogSheet.relativePath;
         dirty = false;
-        await reloadLibrary(wasActive ? moved.relativePath : activeSheetPath, wasActive);
+        if (destinationProjectPath === sourceProjectPath) {
+          await reloadLibrary(wasActive ? moved.relativePath : activeSheetPath, wasActive);
+        } else {
+          await activateLibrary(
+            await openLibraryPath(destinationProjectPath),
+            moved.relativePath,
+          );
+        }
       } else if (sheetDialogMode === "trash" && dialogSheet) {
         const wasActive = activeSheetPath === dialogSheet.relativePath;
         await trashLibrarySheet(libraryPath, dialogSheet.relativePath);
@@ -1602,18 +1658,28 @@ It passed the abandoned signal house before descending between black pines to th
     }
   }
 
-  function rememberProject(selected: LibrarySnapshot): void {
+  function rememberProject(selected: LibrarySnapshot, sheetPath: string | null): void {
     const existing = projects.find((project) => project.path === selected.path);
     const bookmark: ProjectBookmark = {
       id: existing?.id ?? createProjectId(),
       name: selected.name,
       path: selected.path,
       pinned: existing?.pinned ?? false,
+      open: true,
       lastOpened: Date.now(),
+      lastSheetPath: sheetPath,
     };
     const others = projects.filter((project) => project.path !== selected.path);
 
     projects = [bookmark, ...others];
+    saveProjects();
+  }
+
+  function rememberActiveProjectSheet(sheetPath: string | null): void {
+    if (!libraryPath) return;
+    projects = projects.map((project) =>
+      project.path === libraryPath ? { ...project, lastSheetPath: sheetPath } : project,
+    );
     saveProjects();
   }
 
@@ -1625,7 +1691,10 @@ It passed the abandoned signal house before descending between black pines to th
   }
 
   function saveProjects(): void {
-    localStorage.setItem("writing-environment.projects", JSON.stringify(projects));
+    const storedProjects = reopenLastWorkspace
+      ? projects
+      : projects.map((project) => ({ ...project, open: false }));
+    localStorage.setItem("writing-environment.projects", JSON.stringify(storedProjects));
   }
 
   function loadStoredProjects(): ProjectBookmark[] {
@@ -1653,7 +1722,12 @@ It passed the abandoned signal house before descending between black pines to th
           name: project.name,
           path: project.path,
           pinned: project.pinned,
+          open: "open" in project && typeof project.open === "boolean" ? project.open : false,
           lastOpened: project.lastOpened,
+          lastSheetPath: "lastSheetPath" in project
+            && (typeof project.lastSheetPath === "string" || project.lastSheetPath === null)
+            ? project.lastSheetPath
+            : null,
         });
       }
       return stored;
@@ -1665,6 +1739,14 @@ It passed the abandoned signal house before descending between black pines to th
   function createProjectId(): string {
     return globalThis.crypto?.randomUUID?.()
       ?? `project-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  }
+
+  function libraryWarningMessage(snapshot: LibrarySnapshot): string {
+    const warnings = snapshot.warnings ?? [];
+    if (warnings.length === 0) return "";
+    const listed = warnings.slice(0, 3).join("; ");
+    const remainder = warnings.length - 3;
+    return `Opened ${snapshot.name}, but skipped ${warnings.length} unreadable Markdown ${warnings.length === 1 ? "file" : "files"}: ${listed}${remainder > 0 ? `; and ${remainder} more` : ""}`;
   }
 
   function isSheetSort(value: string | null): value is SheetSort {
@@ -1899,7 +1981,7 @@ It passed the abandoned signal house before descending between black pines to th
                   title={project.path}
                   onclick={() => void openProject(project)}
                 >
-                  <span aria-hidden="true">{activeProjectPath === project.path ? "▾" : "▱"}</span>
+                  <span aria-hidden="true">{activeProjectPath === project.path ? "▾" : project.open ? "▱" : "◇"}</span>
                   <span>{project.name}</span>
                 </button>
                 <button
@@ -1921,7 +2003,7 @@ It passed the abandoned signal house before descending between black pines to th
                     style={`left: ${projectMenuX}px; top: ${projectMenuY}px;`}
                   >
                     {#if activeProjectPath !== project.path}
-                      <button role="menuitem" onclick={() => void openProject(project)}>Open Project</button>
+                      <button role="menuitem" onclick={() => void openProject(project)}>{project.open ? "Switch to Project" : "Open Project"}</button>
                     {/if}
                     <button
                       role="menuitem"
@@ -1930,13 +2012,13 @@ It passed the abandoned signal house before descending between black pines to th
                         projectMenuPath = null;
                       }}
                     >{project.pinned ? "Remove from Favorites" : "Add to Favorites"}</button>
-                    {#if activeProjectPath === project.path}
+                    {#if project.open}
                       <div></div>
                       <button
                         class="danger-action"
                         role="menuitem"
                         disabled={syncRunning || loadingLibrary}
-                        onclick={() => void closeActiveProject()}
+                        onclick={() => void closeProject(project)}
                       >Close Project</button>
                     {/if}
                   </div>
@@ -2807,7 +2889,7 @@ It passed the abandoned signal house before descending between black pines to th
             : sheetDialogMode === "rename"
               ? "Rename sheet"
               : sheetDialogMode === "move"
-                ? "Move to another folder"
+                ? "Move to another project or folder"
                 : "Move sheet to Trash?"}
         </h2>
 
@@ -2821,6 +2903,19 @@ It passed the abandoned signal house before descending between black pines to th
             value={dialogTitle}
             oninput={(event) => (dialogTitle = event.currentTarget.value)}
           />
+        {/if}
+
+        {#if sheetDialogMode === "move"}
+          <label for="sheet-project">Destination project</label>
+          <select
+            id="sheet-project"
+            value={dialogProjectPath}
+            oninput={(event) => (dialogProjectPath = event.currentTarget.value)}
+          >
+            {#each sortedProjects.filter((project) => project.open) as project}
+              <option value={project.path}>{project.name}</option>
+            {/each}
+          </select>
         {/if}
 
         {#if sheetDialogMode === "create" || sheetDialogMode === "move"}
@@ -2839,7 +2934,7 @@ It passed the abandoned signal house before descending between black pines to th
               <option value={folder.path}></option>
             {/each}
           </datalist>
-          <p class="dialog-note">Choose an existing folder or type a nested path such as Research/Locations.</p>
+          <p class="dialog-note">Choose an open project and type a folder path such as Research/Locations.</p>
         {/if}
 
         {#if sheetDialogMode === "trash"}

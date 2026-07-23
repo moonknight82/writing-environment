@@ -14,6 +14,7 @@ export interface LibrarySnapshot {
   name: string;
   path: string;
   sheets: SheetSummary[];
+  warnings: string[];
 }
 
 export interface TrashItem {
@@ -130,6 +131,20 @@ export function moveLibrarySheet(
   group: string,
 ): Promise<SheetSummary> {
   return invoke<SheetSummary>("move_sheet", { root, relativePath, group });
+}
+
+export function moveLibrarySheetToProject(
+  sourceRoot: string,
+  relativePath: string,
+  destinationRoot: string,
+  group: string,
+): Promise<SheetSummary> {
+  return invoke<SheetSummary>("move_sheet_to_project", {
+    sourceRoot,
+    relativePath,
+    destinationRoot,
+    group,
+  });
 }
 
 export function trashLibrarySheet(root: string, relativePath: string): Promise<void> {

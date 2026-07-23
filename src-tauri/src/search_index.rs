@@ -1,4 +1,7 @@
-use super::{is_markdown, markdown_body, path_for_frontend, summarize_sheet, SheetSummary};
+use super::{
+    invalid_utf8_warning, is_markdown, markdown_body, path_for_frontend, summarize_sheet,
+    LibraryScan, SheetSummary,
+};
 use rusqlite::{params, Connection, Statement, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -15,7 +18,7 @@ struct FileState {
     size: i64,
 }
 
-pub(super) fn synchronize(index_path: &Path, root: &Path) -> Result<Vec<SheetSummary>, String> {
+pub(super) fn synchronize(index_path: &Path, root: &Path) -> Result<LibraryScan, String> {
     match synchronize_once(index_path, root) {
         Ok(sheets) => Ok(sheets),
         Err(first_error) => {
@@ -103,10 +106,11 @@ pub(super) fn search(index_path: &Path, query: &str) -> Result<Vec<SheetSummary>
         .map_err(|error| format!("Cannot read an indexed search result: {error}"))
 }
 
-fn synchronize_once(index_path: &Path, root: &Path) -> Result<Vec<SheetSummary>, String> {
+fn synchronize_once(index_path: &Path, root: &Path) -> Result<LibraryScan, String> {
     let mut connection = open_connection(index_path)?;
     let existing = existing_file_states(&connection)?;
     let mut seen = HashSet::with_capacity(existing.len());
+    let mut warnings = Vec::new();
     let transaction = connection
         .transaction()
         .map_err(|error| format!("Cannot begin the library index refresh: {error}"))?;
@@ -133,8 +137,15 @@ fn synchronize_once(index_path: &Path, root: &Path) -> Result<Vec<SheetSummary>,
             continue;
         }
 
-        let content = fs::read_to_string(entry.path())
-            .map_err(|error| format!("Cannot read {}: {error}", relative.display()))?;
+        let content = match fs::read_to_string(entry.path()) {
+            Ok(content) => content,
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+                warnings.push(invalid_utf8_warning(relative));
+                writer.remove(&relative_path)?;
+                continue;
+            }
+            Err(error) => return Err(format!("Cannot read {}: {error}", relative.display())),
+        };
         let summary = summarize_sheet(entry.path(), relative, &content);
         writer.index(&summary, markdown_body(&content), state)?;
     }
@@ -147,7 +158,10 @@ fn synchronize_once(index_path: &Path, root: &Path) -> Result<Vec<SheetSummary>,
     transaction
         .commit()
         .map_err(|error| format!("Cannot finish the library index refresh: {error}"))?;
-    list_summaries(&connection)
+    Ok(LibraryScan {
+        sheets: list_summaries(&connection)?,
+        warnings,
+    })
 }
 
 fn open_connection(index_path: &Path) -> Result<Connection, String> {
@@ -393,7 +407,10 @@ mod tests {
         fs::write(&second, "# Second\n\nA blue window.").expect("second sheet");
 
         assert_eq!(
-            synchronize(&index, root.path()).expect("first index").len(),
+            synchronize(&index, root.path())
+                .expect("first index")
+                .sheets
+                .len(),
             2
         );
         assert_eq!(search(&index, "lighthouse").expect("first search").len(), 1);
@@ -403,6 +420,7 @@ mod tests {
         assert_eq!(
             synchronize(&index, root.path())
                 .expect("refresh index")
+                .sheets
                 .len(),
             1
         );
@@ -450,6 +468,23 @@ mod tests {
     }
 
     #[test]
+    fn index_skips_invalid_utf8_without_blocking_valid_sheets() {
+        let root = tempfile::tempdir().expect("temporary library");
+        let state = tempfile::tempdir().expect("temporary index state");
+        let index = state.path().join("library.sqlite3");
+        fs::write(root.path().join("safe.md"), "# Safe\n\nSearchable lantern.")
+            .expect("valid sheet");
+        fs::write(root.path().join("legacy.md"), [0xff, 0xfe, 0x61]).expect("invalid sheet");
+
+        let scan = synchronize(&index, root.path()).expect("build partial index");
+
+        assert_eq!(scan.sheets.len(), 1);
+        assert_eq!(scan.warnings.len(), 1);
+        assert!(scan.warnings[0].contains("legacy.md is not UTF-8"));
+        assert_eq!(search(&index, "lantern").expect("valid search").len(), 1);
+    }
+
+    #[test]
     fn corrupt_database_is_rebuilt_from_markdown() {
         let root = tempfile::tempdir().expect("temporary library");
         let state = tempfile::tempdir().expect("temporary index state");
@@ -459,7 +494,7 @@ mod tests {
 
         let sheets = synchronize(&index, root.path()).expect("rebuild corrupt index");
 
-        assert_eq!(sheets.len(), 1);
+        assert_eq!(sheets.sheets.len(), 1);
         assert_eq!(search(&index, "keep").expect("rebuilt search").len(), 1);
     }
 
@@ -502,8 +537,8 @@ mod tests {
         eprintln!(
             "10k index: cold={cold_elapsed:?}, search={search_elapsed:?}, warm={warm_elapsed:?}"
         );
-        assert_eq!(sheets.len(), 10_000);
-        assert_eq!(warm_sheets.len(), 10_000);
+        assert_eq!(sheets.sheets.len(), 10_000);
+        assert_eq!(warm_sheets.sheets.len(), 10_000);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].relative_path, "Group-09/sheet-0999.md");
     }
