@@ -51,9 +51,22 @@ Current work:
 
 Application updates remain separate from Raspberry Pi appliance/OS updates.
 
-## v0.4 — Export
+## v0.4 — Unified library
 
-Planned after signed distribution is proven on the Pi:
+Planned in staged, testable increments:
+
+1. [x] Make the unloaded desktop state genuinely empty and add safe project closing.
+2. [ ] Add a persistent project registry and show real nested project folders.
+3. [ ] Add a universal Inbox with safe moves into projects.
+4. [ ] Aggregate origin-partitioned Trash into a universal recovery view.
+5. [ ] Replace per-project sync configuration in the interface with one universal remote root and per-project inclusion toggles, while retaining isolated sync jobs underneath.
+6. [ ] Migrate existing sync preferences without silently uploading or deleting files.
+
+See [Unified library model](unified-library.md) for the storage, recovery, and sync boundaries.
+
+## v0.5 — Export
+
+Planned after the unified library is stable:
 
 1. DOCX export with a small set of predictable manuscript styles.
 2. Print-ready PDF export using the same style model.

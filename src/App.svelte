@@ -145,10 +145,12 @@ Elias had written each one in a different ink, but every version ended with the 
   };
 
   const initialText = prototypeSheetBodies[prototypeSheets[0].relativePath];
+  const desktopMode = desktopAvailable()
+    || (import.meta.env.DEV && new URLSearchParams(globalThis.location?.search ?? "").has("desktop-preview"));
 
-  let activeGroup = "Draft";
-  let activeSheet = "The Arrival";
-  let activeSheetPath: string | null = prototypeSheets[0].relativePath;
+  let activeGroup = desktopMode ? "All Sheets" : "Draft";
+  let activeSheet = desktopMode ? "No sheet open" : "The Arrival";
+  let activeSheetPath: string | null = desktopMode ? null : prototypeSheets[0].relativePath;
   let activeThemeId = "paper";
   let libraryVisible = true;
   let sheetsVisible = true;
@@ -174,16 +176,20 @@ Elias had written each one in a different ink, but every version ended with the 
   let sessionWords = 0;
   const sessionBaselines = new Map<string, number>();
   const sessionCounts = new Map<string, number>();
-  let content = initialText;
-  let persistedContent = initialText;
-  let saveStatus = "Saved locally";
-  let libraryName = "Prototype Library";
+  let content = desktopMode ? "" : initialText;
+  let persistedContent = content;
+  let saveStatus = desktopMode ? "No sheet open" : "Saved locally";
+  let libraryName = desktopMode ? "No project open" : "Prototype Library";
   let libraryPath: string | null = null;
-  let sheets = prototypeSheets;
-  let groups = groupSummaries(prototypeSheets);
-  let visibleSheets = prototypeSheets.filter((sheet) => sheet.group === activeGroup);
+  let sheets = desktopMode ? [] : prototypeSheets;
+  let groups = groupSummaries(sheets);
+  let visibleSheets = sheets.filter((sheet) => sheet.group === activeGroup);
   let projects: ProjectBookmark[] = [];
   let sortedProjects: ProjectBookmark[] = [];
+  let sidebarProjects: ProjectBookmark[] = [];
+  let projectMenuPath: string | null = null;
+  let projectMenuX = 0;
+  let projectMenuY = 0;
   let trashItems: TrashItem[] = [];
   let searchQuery = "";
   let searchResults: SheetSummary[] = [];
@@ -236,7 +242,7 @@ Elias had written each one in a different ink, but every version ended with the 
   let externalConflictPath: string | null = null;
   let externalDiskContent: string | null = null;
   let resolvingExternalConflict = false;
-  let appVersion = "0.3.1";
+  let appVersion = "0.3.2";
   let automaticUpdateChecks = true;
   let updateVisible = false;
   let updateChecking = false;
@@ -257,6 +263,9 @@ Elias had written each one in a different ink, but every version ended with the 
   );
   $: sortedProjects = [...projects].sort(
     (left, right) => Number(right.pinned) - Number(left.pinned) || right.lastOpened - left.lastOpened,
+  );
+  $: sidebarProjects = sortedProjects.filter(
+    (project) => project.pinned || project.path === libraryPath,
   );
   $: focusSegments = buildFocusSegments(content, cursorPosition, writingFocusMode);
   $: syncNeedsInitialization = !syncPreference.initialized
@@ -294,6 +303,7 @@ Elias had written each one in a different ink, but every version ended with the 
     applyTheme(selected);
     projects = loadStoredProjects();
     reopenLastWorkspace = storedReopenPreference !== "false";
+    if (!reopenLastWorkspace) localStorage.removeItem("writing-environment.last-workspace");
     spellCheckEnabled = storedSpellCheck !== "false";
     automaticCorrection = spellCheckEnabled && storedAutomaticCorrection === "true";
     automaticUpdateChecks = storedAutomaticUpdateChecks !== "false";
@@ -309,8 +319,10 @@ Elias had written each one in a different ink, but every version ended with the 
       sessionGoalDraft = sessionGoal;
     }
 
-    content = readPrototypeSheet(activeSheetPath);
-    persistedContent = content;
+    if (!desktopMode) {
+      content = readPrototypeSheet(activeSheetPath);
+      persistedContent = content;
+    }
     registerSessionSheet();
 
     if (reopenLastWorkspace && desktopAvailable()) void reopenStoredWorkspace();
@@ -674,6 +686,13 @@ Elias had written each one in a different ink, but every version ended with the 
     void toggleAppFullscreen();
   }
 
+  function handleWindowClick(event: MouseEvent): void {
+    if (!projectMenuPath) return;
+    const target = event.target;
+    if (target instanceof Element && target.closest(".project-row")) return;
+    projectMenuPath = null;
+  }
+
   function selectTheme(themeId: string): void {
     const selected = themes.find((theme) => theme.id === themeId);
     if (!selected) return;
@@ -924,6 +943,7 @@ Elias had written each one in a different ink, but every version ended with the 
   }
 
   async function openProject(project: ProjectBookmark): Promise<void> {
+    projectMenuPath = null;
     if (!desktopAvailable()) {
       errorMessage = "Pinned projects open in the Tauri desktop build.";
       return;
@@ -943,10 +963,67 @@ Elias had written each one in a different ink, but every version ended with the 
     }
   }
 
+  function openProjectMenu(event: MouseEvent, project: ProjectBookmark): void {
+    event.preventDefault();
+    projectMenuPath = project.path;
+    projectMenuX = Math.max(8, Math.min(event.clientX, window.innerWidth - 166));
+    projectMenuY = Math.max(8, Math.min(event.clientY, window.innerHeight - 128));
+  }
+
+  async function closeActiveProject(): Promise<void> {
+    if (!libraryPath || syncRunning || loadingLibrary) return;
+    if (dirty && !(await persistCurrentSheet())) return;
+
+    if (syncTimer) clearTimeout(syncTimer);
+    syncTimer = undefined;
+    if (desktopAvailable()) {
+      try {
+        await unwatchLibrary();
+      } catch {
+        // The project may already have stopped being watched.
+      }
+    }
+
+    projectMenuPath = null;
+    localStorage.removeItem("writing-environment.last-workspace");
+    clearWorkspace();
+  }
+
+  function clearWorkspace(): void {
+    libraryPath = null;
+    libraryName = "No project open";
+    activeGroup = "All Sheets";
+    activeSheet = "No sheet open";
+    activeSheetPath = null;
+    sheets = [];
+    groups = [];
+    trashItems = [];
+    searchQuery = "";
+    searchResults = [];
+    content = "";
+    persistedContent = "";
+    cursorPosition = 0;
+    dirty = false;
+    saveStatus = "No sheet open";
+    syncPreference = emptySyncPreference();
+    syncDraftRemote = "";
+    syncDraftPath = "";
+    syncPhase = "local";
+    syncStatus = "No project open";
+    syncMessage = "";
+    clearExternalConflict();
+  }
+
   async function activateLibrary(
     selected: LibrarySnapshot,
     preferredSheetPath: string | null = null,
   ): Promise<void> {
+    const firstSheet = selected.sheets.find((sheet) => sheet.relativePath === preferredSheetPath)
+      ?? selected.sheets[0];
+    const firstContent = firstSheet
+      ? await readLibrarySheet(selected.path, firstSheet.relativePath)
+      : "";
+
     libraryName = selected.name;
     libraryPath = selected.path;
     loadProjectSyncPreference(selected.path, selected.name);
@@ -954,13 +1031,11 @@ Elias had written each one in a different ink, but every version ended with the 
     groups = groupSummaries(selected.sheets);
     rememberProject(selected);
 
-    const firstSheet = selected.sheets.find((sheet) => sheet.relativePath === preferredSheetPath)
-      ?? selected.sheets[0];
     if (firstSheet) {
       activeGroup = firstSheet.group;
       activeSheet = firstSheet.title;
       activeSheetPath = firstSheet.relativePath;
-      content = await readLibrarySheet(selected.path, firstSheet.relativePath);
+      content = firstContent;
       persistedContent = content;
     } else {
       activeGroup = "All Sheets";
@@ -1257,10 +1332,12 @@ Elias had written each one in a different ink, but every version ended with the 
   function setReopenLastWorkspace(enabled: boolean): void {
     reopenLastWorkspace = enabled;
     localStorage.setItem("writing-environment.reopen-last-workspace", String(enabled));
+    if (enabled) rememberLastWorkspace();
+    else localStorage.removeItem("writing-environment.last-workspace");
   }
 
   function rememberLastWorkspace(): void {
-    if (!libraryPath) return;
+    if (!reopenLastWorkspace || !libraryPath) return;
     const workspace: LastWorkspace = { projectPath: libraryPath, sheetPath: activeSheetPath };
     localStorage.setItem("writing-environment.last-workspace", JSON.stringify(workspace));
   }
@@ -1694,13 +1771,14 @@ Elias had written each one in a different ink, but every version ended with the 
   <title>{activeSheet} — Writing Environment</title>
 </svelte:head>
 
-<svelte:window onkeydown={handleWindowKeydown} />
+<svelte:window onkeydown={handleWindowKeydown} onclick={handleWindowClick} />
 
 <main
   class:library-hidden={!libraryVisible}
   class:sheets-hidden={!sheetsVisible}
   class:focus-mode={!libraryVisible && !sheetsVisible}
   class:app-fullscreen={appFullscreen}
+  class:workspace-empty={desktopMode && !libraryPath}
 >
   <aside class="library" aria-label="Library">
     <div class="brand">
@@ -1720,10 +1798,15 @@ Elias had written each one in a different ink, but every version ended with the 
         >＋</button>
       </div>
 
-      {#if sortedProjects.length > 0}
+      {#if sidebarProjects.length > 0}
         <div class="project-list">
-          {#each sortedProjects as project}
-            <div class:active={libraryPath === project.path} class="project-row">
+          {#each sidebarProjects as project}
+            <div
+              class:active={libraryPath === project.path}
+              class="project-row"
+              role="group"
+              oncontextmenu={(event) => openProjectMenu(event, project)}
+            >
               <button
                 class="project-open"
                 title={project.path}
@@ -1738,13 +1821,44 @@ Elias had written each one in a different ink, but every version ended with the 
                 aria-label={`${project.pinned ? "Unpin" : "Pin"} ${project.name}`}
                 aria-pressed={project.pinned}
                 title={project.pinned ? "Unpin project" : "Pin project"}
-                onclick={() => toggleProjectPin(project.path)}
+                onclick={() => {
+                  toggleProjectPin(project.path);
+                  projectMenuPath = null;
+                }}
               >{project.pinned ? "★" : "☆"}</button>
+              {#if projectMenuPath === project.path}
+                <div
+                  class="project-context-menu"
+                  role="menu"
+                  aria-label={`Actions for ${project.name}`}
+                  style={`left: ${projectMenuX}px; top: ${projectMenuY}px;`}
+                >
+                  {#if libraryPath !== project.path}
+                    <button role="menuitem" onclick={() => void openProject(project)}>Open Project</button>
+                  {/if}
+                  <button
+                    role="menuitem"
+                    onclick={() => {
+                      toggleProjectPin(project.path);
+                      projectMenuPath = null;
+                    }}
+                  >{project.pinned ? "Remove from Favorites" : "Add to Favorites"}</button>
+                  {#if libraryPath === project.path}
+                    <div></div>
+                    <button
+                      class="danger-action"
+                      role="menuitem"
+                      disabled={syncRunning || loadingLibrary}
+                      onclick={() => void closeActiveProject()}
+                    >Close Project</button>
+                  {/if}
+                </div>
+              {/if}
             </div>
           {/each}
         </div>
       {:else}
-        <p class="projects-empty">Open a folder to keep it close at hand.</p>
+        <p class="projects-empty">No project is open. Favorite projects stay here for quick access.</p>
       {/if}
     </section>
 
@@ -1962,6 +2076,7 @@ Elias had written each one in a different ink, but every version ended with the 
             class:active={syncMenuVisible || syncPhase === "syncing" || syncPhase === "conflict"}
             class:error={syncPhase === "error"}
             class="sync-button"
+            disabled={desktopMode && !libraryPath}
             aria-label={`Project sync: ${syncStatus}`}
             aria-haspopup="dialog"
             aria-expanded={syncMenuVisible}
@@ -2379,6 +2494,13 @@ Elias had written each one in a different ink, but every version ended with the 
           </div>
         </aside>
       {/if}
+      {#if desktopMode && !libraryPath}
+        <div class="no-workspace">
+          <span aria-hidden="true">◇</span>
+          <strong>No project open</strong>
+          <p>Open a project folder from the Projects sidebar to begin writing.</p>
+        </div>
+      {:else}
       <div class="editor-stage">
         {#if writingFocusMode !== "off"}
           <pre class="focus-overlay" aria-hidden="true" bind:this={focusOverlay}>{#each focusSegments as segment}<span class:active={segment.active}>{segment.text}</span>{/each}</pre>
@@ -2400,6 +2522,7 @@ Elias had written each one in a different ink, but every version ended with the 
         onscroll={(event) => syncFocusOverlay(event.currentTarget)}
       ></textarea>
       </div>
+      {/if}
     </div>
 
     <footer class="editor-status">

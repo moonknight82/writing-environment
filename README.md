@@ -42,6 +42,8 @@ Version 0.3.0 is the updater bootstrap release. Install it manually once on each
 
 Version 0.3.1 is the first updater-delivered maintenance release. It corrects writing-focus text wrapping on macOS when the editor has a visible scrollbar, including long Markdown paragraphs created on Raspberry Pi.
 
+Version 0.3.2 corrects desktop workspace restoration after updating. With no project open, the desktop app now stays genuinely empty; disabling last-workspace reopening clears the saved workspace immediately; only the active project and favorites remain in the sidebar; and the active project can be unloaded with **Right-click → Close Project**.
+
 Update artifacts and `latest.json` are published through [GitHub Releases](https://github.com/moonknight82/writing-environment/releases). Every application update is verified with Tauri's embedded public signing key before installation. The private key is held only in the repository's GitHub Actions secrets. macOS uses a signed Tauri application archive; Linux amd64 and Raspberry Pi use signed Debian packages and request system authorization when installation begins.
 
 Application updates do not modify Raspberry Pi OS, desktop settings, rclone configuration, projects, or recovery data. Appliance-level changes remain separate, deliberate updates or full-image releases.
@@ -143,7 +145,7 @@ Release bundles require the updater signing key through `TAURI_SIGNING_PRIVATE_K
 
 ## Publishing a release
 
-The public release workflow builds macOS Apple Silicon, Linux amd64, and Raspberry Pi ARM64 packages. To publish, update the version consistently in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`, commit it, then push the matching tag—for example `v0.3.0`. GitHub Actions tests, builds, signs, and publishes the packages and updater manifest. See [Release process](docs/releases.md) for signing-key recovery and release checks.
+The public release workflow builds macOS Apple Silicon, Linux amd64, and Raspberry Pi ARM64 packages. To publish, update the version consistently in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`, commit it, then push the matching tag—for example `v0.3.2`. GitHub Actions tests, builds, signs, and publishes the packages and updater manifest. See [Release process](docs/releases.md) for signing-key recovery and release checks.
 
 Native system spelling and grammar checking are enabled by default and can be changed in the Writer (`Aa`) panel. Linux builds initialize WebKitGTK with the bundled English (US) and Brazilian Portuguese Hunspell dictionaries; macOS builds enable WebKit's continuous spelling and grammar services. Writing Focus preserves the operating system's native underlines. Automatic correction remains off by default so the operating system cannot silently rewrite manuscript text unless the writer opts in.
 
@@ -157,4 +159,5 @@ Native system spelling and grammar checking are enabled by default and can be ch
 - [Dedicated Raspberry Pi image](docs/pi-image.md)
 - [Linux amd64 port](docs/linux-amd64.md)
 - [Development plan](docs/development-plan.md)
+- [Unified library model](docs/unified-library.md)
 - [Release process](docs/releases.md)
