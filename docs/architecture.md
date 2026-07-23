@@ -31,6 +31,8 @@ The desktop application maintains a rebuildable SQLite FTS index under its appli
 
 Each open desktop project also has one native recursive filesystem watcher. Markdown and group-folder events are coalesced after a quiet period before the index and visible library are reconciled. Unrelated assets and hidden synchronization markers do not trigger refresh work. An externally changed active sheet is reread only when the editor is clean. If the editor is dirty, autosave compares against the exact last-known disk contents and stops on a mismatch; the writer can then keep the disk version and preserve the local draft as a separate conflict sheet.
 
+The interface keeps a persistent registry of every project the writer has opened, including a stable local identifier, favorite state, and last-opened time. Closed non-favorites remain registered but hidden from the calm default sidebar. The active project's navigation tree is derived from complete Markdown relative paths, so nested folders remain visible without adding proprietary project metadata to the manuscript folder.
+
 ## Synchronization boundary
 
 The app coordinates `rclone bisync`; it does not implement Dropbox OAuth or embed cloud credentials. Provider configuration remains in rclone's user configuration. Each project/remote pair receives an isolated work directory under the app-data folder, outside the Markdown project.

@@ -747,11 +747,15 @@ fn group_directory(root: &Path, group: &str) -> Result<PathBuf, String> {
     if group.is_empty() || group == "Ungrouped" {
         return Ok(root.to_path_buf());
     }
-    let mut components = Path::new(group).components();
-    match (components.next(), components.next()) {
-        (Some(Component::Normal(name)), None) if !name.is_empty() => Ok(root.join(name)),
-        _ => Err("The group name must be a single folder name.".into()),
+    let relative = Path::new(group);
+    if relative.is_absolute()
+        || relative
+            .components()
+            .any(|component| !matches!(component, Component::Normal(name) if !name.is_empty()))
+    {
+        return Err("The project folder path must stay inside the project.".into());
     }
+    Ok(root.join(relative))
 }
 
 fn slugify(title: &str) -> String {
@@ -1584,9 +1588,28 @@ mod tests {
     }
 
     #[test]
-    fn nested_group_names_are_rejected() {
+    fn nested_project_folders_are_allowed_without_path_escape() {
         let root = tempfile::tempdir().expect("temporary library");
-        assert!(group_directory(root.path(), "Draft/Outside").is_err());
+        assert_eq!(
+            group_directory(root.path(), "Research/Locations").expect("nested folder"),
+            root.path().join("Research").join("Locations")
+        );
+        assert!(group_directory(root.path(), "../Outside").is_err());
+        assert!(group_directory(root.path(), "/Outside").is_err());
+
+        let root_string = root.path().to_string_lossy().into_owned();
+        let created = create_sheet(
+            root_string.clone(),
+            "Research/Locations".into(),
+            "Harbor Road".into(),
+        )
+        .expect("create nested sheet");
+        assert_eq!(created.relative_path, "Research/Locations/harbor-road.md");
+
+        let moved = move_sheet_on_disk(&root_string, &created.relative_path, "Draft/Chapter One")
+            .expect("move between nested folders");
+        assert_eq!(moved.relative_path, "Draft/Chapter One/harbor-road.md");
+        assert!(root.path().join(&moved.relative_path).is_file());
     }
 
     #[test]

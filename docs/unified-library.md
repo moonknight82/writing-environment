@@ -67,10 +67,9 @@ Existing project-based rclone profiles will be migrated, not discarded. The migr
 
 ## Delivery stages
 
-1. Correct empty/restored workspace state and add Close Project.
-2. Add a persistent project registry and nested folder tree.
-3. Add the universal Inbox and safe Move to Project.
-4. Aggregate existing origin-partitioned Trash into one view.
-5. Add universal sync configuration, per-project inclusion, migration, and aggregate status.
-6. Run multi-project conflict, recovery, 10,000-sheet, and physical Raspberry Pi 4 tests.
-
+1. [x] Correct empty/restored workspace state and add Close Project.
+2. [x] Add a persistent project registry and nested folder tree.
+3. [ ] Add the universal Inbox and safe Move to Project.
+4. [ ] Aggregate existing origin-partitioned Trash into one view.
+5. [ ] Add universal sync configuration, per-project inclusion, migration, and aggregate status.
+6. [ ] Run multi-project conflict, recovery, 10,000-sheet, and physical Raspberry Pi 4 tests.

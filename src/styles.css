@@ -119,8 +119,8 @@ nav .eyebrow {
 
 .projects-section {
   display: flex;
-  max-height: 43%;
-  min-height: 132px;
+  min-height: 0;
+  flex: 1;
   flex-direction: column;
   padding: 18px 10px;
 }
@@ -157,6 +157,10 @@ nav .eyebrow {
   min-height: 0;
   margin-top: 10px;
   overflow: auto;
+}
+
+.project-entry + .project-entry {
+  margin-top: 3px;
 }
 
 .project-row {
@@ -251,6 +255,56 @@ nav .eyebrow {
 
 .project-context-menu .danger-action {
   color: #a1453b;
+}
+
+.project-folder-tree {
+  min-height: auto;
+  margin: 2px 0 8px 12px;
+  padding: 2px 0 4px 7px;
+  border: 0;
+  border-left: 1px solid var(--border);
+  overflow: visible;
+}
+
+.project-tree-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 11px;
+  text-align: left;
+}
+
+.project-tree-row.folder-row {
+  padding-left: calc(8px + var(--folder-depth) * 13px);
+}
+
+.project-tree-row:hover,
+.project-tree-row.active {
+  color: var(--text);
+  background: var(--accent-soft);
+}
+
+.project-tree-row.active {
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.project-tree-row span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-tree-separator {
+  height: 1px;
+  margin: 5px 8px;
+  background: var(--border);
 }
 
 .projects-empty {

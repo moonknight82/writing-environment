@@ -80,9 +80,9 @@ jobs:
           tagName: v__VERSION__
           releaseName: Writing Environment v__VERSION__
           releaseBody: |
-            Fixes the false-open workspace state that could appear after updating: an unloaded desktop app now shows a genuinely empty editor instead of an editable prototype sheet, so synchronization cannot be confused about whether a real project folder is open.
+            Begins the unified-library milestone with a persistent project registry and real nested folder navigation. The active project now expands directly in the Projects sidebar, and folders such as Research/Locations retain their hierarchy instead of being flattened.
 
-            Disabling “Reopen last project and sheet” now clears the saved workspace immediately. Only the active project and favorites remain in the sidebar, and the active project can be unloaded safely with Right-click → Close Project.
+            Selecting a parent folder includes sheets from its descendants. Creating and moving sheets now accepts safe nested project paths while rejecting paths that could escape the project. Existing projects, Markdown files, sync profiles, History, and Trash remain compatible.
 
             Signed desktop release for macOS Apple Silicon, Linux amd64, and Raspberry Pi ARM64.
 

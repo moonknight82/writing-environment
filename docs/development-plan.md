@@ -56,7 +56,7 @@ Application updates remain separate from Raspberry Pi appliance/OS updates.
 Planned in staged, testable increments:
 
 1. [x] Make the unloaded desktop state genuinely empty and add safe project closing.
-2. [ ] Add a persistent project registry and show real nested project folders.
+2. [x] Add a persistent project registry and show real nested project folders.
 3. [ ] Add a universal Inbox with safe moves into projects.
 4. [ ] Aggregate origin-partitioned Trash into a universal recovery view.
 5. [ ] Replace per-project sync configuration in the interface with one universal remote root and per-project inclusion toggles, while retaining isolated sync jobs underneath.

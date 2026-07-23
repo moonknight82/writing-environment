@@ -39,13 +39,15 @@
   } from "./lib/sync";
   import { applyTheme, themes } from "./lib/themes";
 
-  interface GroupSummary {
+  interface FolderSummary {
+    path: string;
     name: string;
+    depth: number;
     count: number;
-    icon: string;
   }
 
   interface ProjectBookmark {
+    id: string;
     name: string;
     path: string;
     pinned: boolean;
@@ -108,6 +110,14 @@
       createdAt: "2026-07-17T16:45:00-03:00",
     },
     {
+      title: "The Harbor Road",
+      relativePath: "Research/Locations/the-harbor-road.md",
+      group: "Research",
+      excerpt: "The old road reached the harbor from the north.",
+      wordCount: 386,
+      createdAt: "2026-07-16T11:30:00-03:00",
+    },
+    {
       title: "The Empty Room",
       relativePath: "Fragments/the-empty-room.md",
       group: "Fragments",
@@ -142,8 +152,14 @@ Nothing else in the room had moved, but the dust beneath each frame preserved th
 There were three versions of the story.
 
 Elias had written each one in a different ink, but every version ended with the same light moving offshore.`,
+    "Research/Locations/the-harbor-road.md": `# The Harbor Road
+
+The old road reached the harbor from the north.
+
+It passed the abandoned signal house before descending between black pines to the water.`,
   };
 
+  const prototypeProjectPath = "browser-prototype";
   const initialText = prototypeSheetBodies[prototypeSheets[0].relativePath];
   const desktopMode = desktopAvailable()
     || (import.meta.env.DEV && new URLSearchParams(globalThis.location?.search ?? "").has("desktop-preview"));
@@ -182,11 +198,18 @@ Elias had written each one in a different ink, but every version ended with the 
   let libraryName = desktopMode ? "No project open" : "Prototype Library";
   let libraryPath: string | null = null;
   let sheets = desktopMode ? [] : prototypeSheets;
-  let groups = groupSummaries(sheets);
-  let visibleSheets = sheets.filter((sheet) => sheet.group === activeGroup);
-  let projects: ProjectBookmark[] = [];
+  let folders = folderSummaries(sheets);
+  let visibleSheets = sheets.filter((sheet) => sheetIsInFolder(sheet, activeGroup));
+  let projects: ProjectBookmark[] = desktopMode ? [] : [{
+    id: "browser-prototype",
+    name: "Prototype Library",
+    path: prototypeProjectPath,
+    pinned: false,
+    lastOpened: 0,
+  }];
   let sortedProjects: ProjectBookmark[] = [];
   let sidebarProjects: ProjectBookmark[] = [];
+  let activeProjectPath: string | null = null;
   let projectMenuPath: string | null = null;
   let projectMenuX = 0;
   let projectMenuY = 0;
@@ -242,7 +265,7 @@ Elias had written each one in a different ink, but every version ended with the 
   let externalConflictPath: string | null = null;
   let externalDiskContent: string | null = null;
   let resolvingExternalConflict = false;
-  let appVersion = "0.3.2";
+  let appVersion = "0.4.0";
   let automaticUpdateChecks = true;
   let updateVisible = false;
   let updateChecking = false;
@@ -258,14 +281,15 @@ Elias had written each one in a different ink, but every version ended with the 
       ? searchResults
       : activeGroup === "All Sheets"
         ? sheets
-        : sheets.filter((sheet) => sheet.group === activeGroup),
+        : sheets.filter((sheet) => sheetIsInFolder(sheet, activeGroup)),
     sheetSort,
   );
   $: sortedProjects = [...projects].sort(
     (left, right) => Number(right.pinned) - Number(left.pinned) || right.lastOpened - left.lastOpened,
   );
+  $: activeProjectPath = libraryPath ?? (!desktopMode ? prototypeProjectPath : null);
   $: sidebarProjects = sortedProjects.filter(
-    (project) => project.pinned || project.path === libraryPath,
+    (project) => project.pinned || project.path === activeProjectPath,
   );
   $: focusSegments = buildFocusSegments(content, cursorPosition, writingFocusMode);
   $: syncNeedsInitialization = !syncPreference.initialized
@@ -301,7 +325,10 @@ Elias had written each one in a different ink, but every version ended with the 
 
     activeThemeId = selected.id;
     applyTheme(selected);
-    projects = loadStoredProjects();
+    if (desktopMode) {
+      projects = loadStoredProjects();
+      saveProjects();
+    }
     reopenLastWorkspace = storedReopenPreference !== "false";
     if (!reopenLastWorkspace) localStorage.removeItem("writing-environment.last-workspace");
     spellCheckEnabled = storedSpellCheck !== "false";
@@ -498,7 +525,7 @@ Elias had written each one in a different ink, but every version ended with the 
 
       libraryName = snapshot.name;
       sheets = snapshot.sheets;
-      groups = groupSummaries(snapshot.sheets);
+      folders = folderSummaries(snapshot.sheets);
       await refreshTrash();
       if (searchQuery.trim()) handleSearchInput(searchQuery);
 
@@ -522,7 +549,7 @@ Elias had written each one in a different ink, but every version ended with the 
       }
 
       activeSheet = activeSummary.title;
-      if (!searchQuery.trim()) activeGroup = activeSummary.group;
+      if (!searchQuery.trim()) activeGroup = sheetFolder(activeSummary);
       const diskContent = await readLibrarySheet(projectPath, sheetPath);
       if (libraryPath !== projectPath || activeSheetPath !== sheetPath) return;
 
@@ -892,7 +919,7 @@ Elias had written each one in a different ink, but every version ended with the 
     clearExternalConflict();
     activeSheet = sheet.title;
     activeSheetPath = sheet.relativePath;
-    if (!searchQuery.trim()) activeGroup = sheet.group;
+    if (!searchQuery.trim()) activeGroup = sheetFolder(sheet);
 
     if (!libraryPath) {
       content = readPrototypeSheet(sheet.relativePath);
@@ -944,6 +971,7 @@ Elias had written each one in a different ink, but every version ended with the 
 
   async function openProject(project: ProjectBookmark): Promise<void> {
     projectMenuPath = null;
+    if (!desktopMode && project.path === prototypeProjectPath) return;
     if (!desktopAvailable()) {
       errorMessage = "Pinned projects open in the Tauri desktop build.";
       return;
@@ -968,6 +996,13 @@ Elias had written each one in a different ink, but every version ended with the 
     projectMenuPath = project.path;
     projectMenuX = Math.max(8, Math.min(event.clientX, window.innerWidth - 166));
     projectMenuY = Math.max(8, Math.min(event.clientY, window.innerHeight - 128));
+  }
+
+  function selectFolder(folder: string): void {
+    activeGroup = folder;
+    searchQuery = "";
+    searchResults = [];
+    sortMenuVisible = false;
   }
 
   async function closeActiveProject(): Promise<void> {
@@ -996,7 +1031,7 @@ Elias had written each one in a different ink, but every version ended with the 
     activeSheet = "No sheet open";
     activeSheetPath = null;
     sheets = [];
-    groups = [];
+    folders = [];
     trashItems = [];
     searchQuery = "";
     searchResults = [];
@@ -1028,11 +1063,11 @@ Elias had written each one in a different ink, but every version ended with the 
     libraryPath = selected.path;
     loadProjectSyncPreference(selected.path, selected.name);
     sheets = selected.sheets;
-    groups = groupSummaries(selected.sheets);
+    folders = folderSummaries(selected.sheets);
     rememberProject(selected);
 
     if (firstSheet) {
-      activeGroup = firstSheet.group;
+      activeGroup = sheetFolder(firstSheet);
       activeSheet = firstSheet.title;
       activeSheetPath = firstSheet.relativePath;
       content = firstContent;
@@ -1413,8 +1448,10 @@ Elias had written each one in a different ink, but every version ended with the 
     sheetDialogMode = mode;
     dialogSheet = sheet;
     dialogTitle = mode === "rename" ? sheet?.title ?? "" : "";
-    dialogGroup = sheet?.group
-      ?? (activeGroup !== "All Sheets" && activeGroup !== "Trash" ? activeGroup : groups[1]?.name ?? "Draft");
+    dialogGroup = sheet ? sheetFolder(sheet)
+      : activeGroup !== "All Sheets" && activeGroup !== "Trash"
+        ? activeGroup
+        : folders[0]?.path ?? "Draft";
     dialogError = "";
   }
 
@@ -1499,7 +1536,7 @@ Elias had written each one in a different ink, but every version ended with the 
     try {
       const restored = await restoreLibraryTrash(libraryPath, item.id);
       await reloadLibrary(restored.relativePath, true);
-      activeGroup = restored.group;
+      activeGroup = sheetFolder(restored);
       scheduleAutomaticSync();
       errorMessage = "";
     } catch (error) {
@@ -1545,7 +1582,7 @@ Elias had written each one in a different ink, but every version ended with the 
     const snapshot = await openLibraryPath(libraryPath);
     libraryName = snapshot.name;
     sheets = snapshot.sheets;
-    groups = groupSummaries(snapshot.sheets);
+    folders = folderSummaries(snapshot.sheets);
     await refreshTrash();
     if (searchQuery.trim()) handleSearchInput(searchQuery);
 
@@ -1558,7 +1595,7 @@ Elias had written each one in a different ink, but every version ended with the 
         await selectSheet(target, true);
       } else {
         activeSheet = target.title;
-        activeGroup = target.group;
+        activeGroup = sheetFolder(target);
       }
     } else {
       clearEditorForEmptyLibrary();
@@ -1568,19 +1605,15 @@ Elias had written each one in a different ink, but every version ended with the 
   function rememberProject(selected: LibrarySnapshot): void {
     const existing = projects.find((project) => project.path === selected.path);
     const bookmark: ProjectBookmark = {
+      id: existing?.id ?? createProjectId(),
       name: selected.name,
       path: selected.path,
       pinned: existing?.pinned ?? false,
       lastOpened: Date.now(),
     };
     const others = projects.filter((project) => project.path !== selected.path);
-    const pinned = others.filter((project) => project.pinned);
-    const recent = others
-      .filter((project) => !project.pinned)
-      .sort((left, right) => right.lastOpened - left.lastOpened)
-      .slice(0, 5);
 
-    projects = [bookmark, ...pinned, ...recent];
+    projects = [bookmark, ...others];
     saveProjects();
   }
 
@@ -1599,19 +1632,39 @@ Elias had written each one in a different ink, but every version ended with the 
     try {
       const value: unknown = JSON.parse(localStorage.getItem("writing-environment.projects") ?? "[]");
       if (!Array.isArray(value)) return [];
+      const seen = new Set<string>();
+      const stored: ProjectBookmark[] = [];
+      for (const project of value) {
+        if (
+          typeof project !== "object" ||
+          project === null ||
+          typeof project.name !== "string" ||
+          typeof project.path !== "string" ||
+          typeof project.pinned !== "boolean" ||
+          typeof project.lastOpened !== "number" ||
+          seen.has(project.path)
+        ) continue;
 
-      return value.filter(
-        (project): project is ProjectBookmark =>
-          typeof project === "object" &&
-          project !== null &&
-          typeof project.name === "string" &&
-          typeof project.path === "string" &&
-          typeof project.pinned === "boolean" &&
-          typeof project.lastOpened === "number",
-      );
+        seen.add(project.path);
+        stored.push({
+          id: "id" in project && typeof project.id === "string" && project.id
+            ? project.id
+            : createProjectId(),
+          name: project.name,
+          path: project.path,
+          pinned: project.pinned,
+          lastOpened: project.lastOpened,
+        });
+      }
+      return stored;
     } catch {
       return [];
     }
+  }
+
+  function createProjectId(): string {
+    return globalThis.crypto?.randomUUID?.()
+      ?? `project-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   }
 
   function isSheetSort(value: string | null): value is SheetSort {
@@ -1657,17 +1710,48 @@ Elias had written each one in a different ink, but every version ended with the 
           : "Title Z–A";
   }
 
-  function groupSummaries(source: SheetSummary[]): GroupSummary[] {
-    const counts = new Map<string, number>();
-    for (const sheet of source) counts.set(sheet.group, (counts.get(sheet.group) ?? 0) + 1);
+  function sheetFolder(sheet: SheetSummary): string {
+    const separator = sheet.relativePath.lastIndexOf("/");
+    return separator < 0 ? "Ungrouped" : sheet.relativePath.slice(0, separator);
+  }
 
-    const icons = ["◇", "○", "△", "□"];
-    return [
-      { name: "All Sheets", count: source.length, icon: "◫" },
-      ...Array.from(counts.entries())
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([name, count], index) => ({ name, count, icon: icons[index % icons.length] })),
-    ];
+  function sheetIsInFolder(sheet: SheetSummary, folder: string): boolean {
+    const sheetPath = sheetFolder(sheet);
+    if (folder === "Ungrouped") return sheetPath === folder;
+    return sheetPath === folder || sheetPath.startsWith(`${folder}/`);
+  }
+
+  function folderSummaries(source: SheetSummary[]): FolderSummary[] {
+    const counts = new Map<string, number>();
+    for (const sheet of source) {
+      const folder = sheetFolder(sheet);
+      if (folder === "Ungrouped") {
+        counts.set(folder, (counts.get(folder) ?? 0) + 1);
+        continue;
+      }
+
+      const segments = folder.split("/");
+      for (let index = 1; index <= segments.length; index += 1) {
+        const path = segments.slice(0, index).join("/");
+        counts.set(path, (counts.get(path) ?? 0) + 1);
+      }
+    }
+
+    return Array.from(counts.entries())
+      .sort(([left], [right]) => {
+        if (left === "Ungrouped") return -1;
+        if (right === "Ungrouped") return 1;
+        return left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
+      })
+      .map(([path, count]) => {
+        const segments = path === "Ungrouped" ? [] : path.split("/");
+        return {
+          path,
+          name: path === "Ungrouped" ? "Project Root" : segments.at(-1)!,
+          depth: Math.max(0, segments.length - 1),
+          count,
+        };
+      });
   }
 
   function formatTrashDate(value: string): string {
@@ -1801,58 +1885,98 @@ Elias had written each one in a different ink, but every version ended with the 
       {#if sidebarProjects.length > 0}
         <div class="project-list">
           {#each sidebarProjects as project}
-            <div
-              class:active={libraryPath === project.path}
-              class="project-row"
-              role="group"
-              oncontextmenu={(event) => openProjectMenu(event, project)}
-            >
-              <button
-                class="project-open"
-                title={project.path}
-                onclick={() => void openProject(project)}
-              >
-                <span aria-hidden="true">▱</span>
-                <span>{project.name}</span>
-              </button>
-              <button
-                class:pinned={project.pinned}
-                class="pin-project"
-                aria-label={`${project.pinned ? "Unpin" : "Pin"} ${project.name}`}
-                aria-pressed={project.pinned}
-                title={project.pinned ? "Unpin project" : "Pin project"}
-                onclick={() => {
-                  toggleProjectPin(project.path);
-                  projectMenuPath = null;
+            <div class="project-entry">
+              <div
+                class:active={activeProjectPath === project.path}
+                class="project-row"
+                role="group"
+                oncontextmenu={(event) => {
+                  if (desktopMode) openProjectMenu(event, project);
                 }}
-              >{project.pinned ? "★" : "☆"}</button>
-              {#if projectMenuPath === project.path}
-                <div
-                  class="project-context-menu"
-                  role="menu"
-                  aria-label={`Actions for ${project.name}`}
-                  style={`left: ${projectMenuX}px; top: ${projectMenuY}px;`}
+              >
+                <button
+                  class="project-open"
+                  title={project.path}
+                  onclick={() => void openProject(project)}
                 >
-                  {#if libraryPath !== project.path}
-                    <button role="menuitem" onclick={() => void openProject(project)}>Open Project</button>
-                  {/if}
-                  <button
-                    role="menuitem"
-                    onclick={() => {
-                      toggleProjectPin(project.path);
-                      projectMenuPath = null;
-                    }}
-                  >{project.pinned ? "Remove from Favorites" : "Add to Favorites"}</button>
-                  {#if libraryPath === project.path}
-                    <div></div>
+                  <span aria-hidden="true">{activeProjectPath === project.path ? "▾" : "▱"}</span>
+                  <span>{project.name}</span>
+                </button>
+                <button
+                  class:pinned={project.pinned}
+                  class="pin-project"
+                  aria-label={`${project.pinned ? "Unpin" : "Pin"} ${project.name}`}
+                  aria-pressed={project.pinned}
+                  title={project.pinned ? "Unpin project" : "Pin project"}
+                  onclick={() => {
+                    toggleProjectPin(project.path);
+                    projectMenuPath = null;
+                  }}
+                >{project.pinned ? "★" : "☆"}</button>
+                {#if projectMenuPath === project.path}
+                  <div
+                    class="project-context-menu"
+                    role="menu"
+                    aria-label={`Actions for ${project.name}`}
+                    style={`left: ${projectMenuX}px; top: ${projectMenuY}px;`}
+                  >
+                    {#if activeProjectPath !== project.path}
+                      <button role="menuitem" onclick={() => void openProject(project)}>Open Project</button>
+                    {/if}
                     <button
-                      class="danger-action"
                       role="menuitem"
-                      disabled={syncRunning || loadingLibrary}
-                      onclick={() => void closeActiveProject()}
-                    >Close Project</button>
-                  {/if}
-                </div>
+                      onclick={() => {
+                        toggleProjectPin(project.path);
+                        projectMenuPath = null;
+                      }}
+                    >{project.pinned ? "Remove from Favorites" : "Add to Favorites"}</button>
+                    {#if activeProjectPath === project.path}
+                      <div></div>
+                      <button
+                        class="danger-action"
+                        role="menuitem"
+                        disabled={syncRunning || loadingLibrary}
+                        onclick={() => void closeActiveProject()}
+                      >Close Project</button>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+              {#if activeProjectPath === project.path}
+                <nav class="project-folder-tree" aria-label={`${project.name} folders`}>
+                  <button
+                    class:active={activeGroup === "All Sheets"}
+                    class="project-tree-row"
+                    onclick={() => selectFolder("All Sheets")}
+                  >
+                    <span aria-hidden="true">◫</span>
+                    <span>All Sheets</span>
+                    <span class="count">{sheets.length}</span>
+                  </button>
+                  {#each folders as folder}
+                    <button
+                      class:active={activeGroup === folder.path}
+                      class="project-tree-row folder-row"
+                      style={`--folder-depth: ${folder.depth}`}
+                      title={folder.path === "Ungrouped" ? "Sheets in the project root" : folder.path}
+                      onclick={() => selectFolder(folder.path)}
+                    >
+                      <span aria-hidden="true">▱</span>
+                      <span>{folder.name}</span>
+                      <span class="count">{folder.count}</span>
+                    </button>
+                  {/each}
+                  <div class="project-tree-separator"></div>
+                  <button
+                    class:active={activeGroup === "Trash"}
+                    class="project-tree-row"
+                    onclick={() => selectFolder("Trash")}
+                  >
+                    <span aria-hidden="true">♲</span>
+                    <span>Trash</span>
+                    <span class="count">{trashItems.length}</span>
+                  </button>
+                </nav>
               {/if}
             </div>
           {/each}
@@ -1861,41 +1985,6 @@ Elias had written each one in a different ink, but every version ended with the 
         <p class="projects-empty">No project is open. Favorite projects stay here for quick access.</p>
       {/if}
     </section>
-
-    <nav aria-label="Writing groups">
-      <p class="eyebrow">Library</p>
-      {#each groups as group}
-        <button
-          class:active={activeGroup === group.name}
-          class="nav-row"
-          onclick={() => {
-            activeGroup = group.name;
-            searchQuery = "";
-            searchResults = [];
-            sortMenuVisible = false;
-          }}
-        >
-          <span class="nav-icon" aria-hidden="true">{group.icon}</span>
-          <span>{group.name}</span>
-          <span class="count">{group.count}</span>
-        </button>
-      {/each}
-      <div class="nav-separator"></div>
-      <button
-        class:active={activeGroup === "Trash"}
-        class="nav-row"
-        onclick={() => {
-          activeGroup = "Trash";
-          searchQuery = "";
-          searchResults = [];
-          sortMenuVisible = false;
-        }}
-      >
-        <span class="nav-icon" aria-hidden="true">♲</span>
-        <span>Trash</span>
-        <span class="count">{trashItems.length}</span>
-      </button>
-    </nav>
 
     <div class="library-footer">
       <span class:error-dot={Boolean(errorMessage)} class="status-dot"></span>
@@ -1908,7 +1997,7 @@ Elias had written each one in a different ink, but every version ended with the 
   <section class="sheet-list" aria-label="Sheets">
     <header class="panel-header">
       <div>
-        <p class="eyebrow">{searchQuery.trim() ? "Library" : "Group"}</p>
+        <p class="eyebrow">{searchQuery.trim() ? "Project" : "Folder"}</p>
         <h1>{searchQuery.trim() ? "Search" : activeGroup}</h1>
       </div>
       <div class="panel-header-actions">
@@ -2000,7 +2089,7 @@ Elias had written each one in a different ink, but every version ended with the 
             >
               <strong>{sheet.title}</strong>
               <span class="excerpt">{sheet.excerpt}</span>
-              <span class="sheet-meta">{sheet.wordCount.toLocaleString()} words · {sheet.group}</span>
+              <span class="sheet-meta">{sheet.wordCount.toLocaleString()} words · {sheetFolder(sheet)}</span>
             </button>
             {#if libraryPath}
               <button
@@ -2014,7 +2103,7 @@ Elias had written each one in a different ink, but every version ended with the 
                 <div class="sheet-actions-menu" role="menu">
                   <button role="menuitem" onclick={() => openSheetDialog("rename", sheet)}>Rename</button>
                   <button role="menuitem" onclick={() => void duplicateSheet(sheet)}>Duplicate</button>
-                  <button role="menuitem" onclick={() => openSheetDialog("move", sheet)}>Move to group…</button>
+                  <button role="menuitem" onclick={() => openSheetDialog("move", sheet)}>Move to folder…</button>
                   <div></div>
                   <button class="danger-action" role="menuitem" onclick={() => openSheetDialog("trash", sheet)}>Move to Trash</button>
                 </div>
@@ -2718,7 +2807,7 @@ Elias had written each one in a different ink, but every version ended with the 
             : sheetDialogMode === "rename"
               ? "Rename sheet"
               : sheetDialogMode === "move"
-                ? "Move to another group"
+                ? "Move to another folder"
                 : "Move sheet to Trash?"}
         </h2>
 
@@ -2735,7 +2824,7 @@ Elias had written each one in a different ink, but every version ended with the 
         {/if}
 
         {#if sheetDialogMode === "create" || sheetDialogMode === "move"}
-          <label for="sheet-group">Group folder</label>
+          <label for="sheet-group">Project folder</label>
           <input
             id="sheet-group"
             type="text"
@@ -2746,11 +2835,11 @@ Elias had written each one in a different ink, but every version ended with the 
             oninput={(event) => (dialogGroup = event.currentTarget.value)}
           />
           <datalist id="known-groups">
-            {#each groups.filter((group) => group.name !== "All Sheets") as group}
-              <option value={group.name}></option>
+            {#each folders as folder}
+              <option value={folder.path}></option>
             {/each}
           </datalist>
-          <p class="dialog-note">Choose an existing group or type a new folder name.</p>
+          <p class="dialog-note">Choose an existing folder or type a nested path such as Research/Locations.</p>
         {/if}
 
         {#if sheetDialogMode === "trash"}
