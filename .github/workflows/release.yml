@@ -21,10 +21,45 @@ jobs:
           version="$(node -p "require('./package.json').version")"
           test "${GITHUB_REF_NAME}" = "v${version}"
 
-  publish:
+  prepare-release:
     needs: verify-version
+    runs-on: ubuntu-22.04
+    outputs:
+      release_id: ${{ steps.release.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Create or locate the release
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tag="v${version}"
+          release_id="$(
+            gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
+              --jq ".[] | select(.tag_name == \"${tag}\") | .id" | sort -n | head -1
+          )"
+
+          if [[ -z "$release_id" ]]; then
+            gh release create "$tag" \
+              --target "$GITHUB_SHA" \
+              --title "Writing Environment ${tag}" \
+              --notes-file .github/release-notes.md
+            release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .id)"
+          fi
+
+          echo "release_id=${release_id}" >>"$GITHUB_OUTPUT"
+
+  publish:
+    needs:
+      - verify-version
+      - prepare-release
     strategy:
       fail-fast: false
+      # Each job merges its platform into latest.json. Serial uploads prevent
+      # concurrent jobs from replacing that file with stale platform data.
+      max-parallel: 1
       matrix:
         include:
           - platform: macos-latest
@@ -77,8 +112,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
           APPLE_SIGNING_IDENTITY: ${{ matrix.apple_identity }}
         with:
-          tagName: v__VERSION__
-          releaseName: Writing Environment v__VERSION__
+          releaseId: ${{ needs.prepare-release.outputs.release_id }}
           releaseBody: |
             Begins the unified-library milestone with a persistent project registry and real nested folder navigation. The active project now expands directly in the Projects sidebar, and folders such as Research/Locations retain their hierarchy instead of being flattened.
 
