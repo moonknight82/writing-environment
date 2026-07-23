@@ -80,6 +80,8 @@ jobs:
           tagName: v__VERSION__
           releaseName: Writing Environment v__VERSION__
           releaseBody: |
+            Fixes writing-focus rendering on macOS when a visible scrollbar caused long Markdown paragraphs to wrap differently across the editor layers. Focused text now remains aligned for manuscripts created on Raspberry Pi, Linux, or macOS.
+
             Signed desktop release for macOS Apple Silicon, Linux amd64, and Raspberry Pi ARM64.
 
             This is a personal project under active development. Back up important writing and review the release notes before updating.

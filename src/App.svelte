@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
+  import { afterUpdate, onDestroy, onMount } from "svelte";
   import { getVersion } from "@tauri-apps/api/app";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
@@ -236,7 +236,7 @@ Elias had written each one in a different ink, but every version ended with the 
   let externalConflictPath: string | null = null;
   let externalDiskContent: string | null = null;
   let resolvingExternalConflict = false;
-  let appVersion = "0.3.0";
+  let appVersion = "0.3.1";
   let automaticUpdateChecks = true;
   let updateVisible = false;
   let updateChecking = false;
@@ -263,6 +263,11 @@ Elias had written each one in a different ink, but every version ended with the 
     || syncDraftRemote !== syncPreference.remote
     || syncDraftPath.trim() !== syncPreference.remotePath;
   $: selectedRevision = historyRevisions.find((revision) => revision.id === selectedRevisionId);
+
+  afterUpdate(() => {
+    if (writingFocusMode !== "off") syncFocusOverlay(editorTextarea);
+  });
+
   onMount(() => {
     const savedTheme = localStorage.getItem("writing-environment.theme");
     const storedLineHeight = localStorage.getItem("writing-environment.line-height");
@@ -774,6 +779,8 @@ Elias had written each one in a different ink, but every version ended with the 
 
   function syncFocusOverlay(target: HTMLTextAreaElement): void {
     if (!target || !focusOverlay) return;
+    const scrollbarWidth = Math.max(0, target.offsetWidth - target.clientWidth);
+    focusOverlay.style.setProperty("--editor-scrollbar-width", `${scrollbarWidth}px`);
     focusOverlay.scrollTop = target.scrollTop;
     focusOverlay.scrollLeft = target.scrollLeft;
   }

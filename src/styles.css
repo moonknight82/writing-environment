@@ -1487,9 +1487,9 @@ textarea {
 }
 
 textarea.focus-enabled {
-  color: var(--text);
+  color: transparent;
   text-shadow: none;
-  -webkit-text-fill-color: var(--text);
+  -webkit-text-fill-color: transparent;
 }
 
 .focus-overlay {
@@ -1498,6 +1498,7 @@ textarea.focus-enabled {
   inset: 0;
   overflow: hidden;
   margin: 0;
+  padding-right: calc(clamp(28px, 7vw, 84px) + var(--editor-scrollbar-width, 0px));
   color: var(--text);
   pointer-events: none;
   text-shadow: var(--prose-text-shadow, none);

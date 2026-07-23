@@ -1,6 +1,6 @@
 # METABEGIN
 # X-Env-Layer-Name: writing-environment-desktop
-# X-Env-Layer-Version: 0.3.0
+# X-Env-Layer-Version: 0.3.1
 # X-Env-Layer-Category: application
 # X-Env-Layer-Desc: Minimal Labwc writing appliance with Writing Environment.
 # X-Env-Layer-Requires: device-user-admin,systemd-min

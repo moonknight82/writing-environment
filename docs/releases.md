@@ -11,12 +11,13 @@ The current macOS package uses ad-hoc Apple code signing for personal testing. T
 ## Publish
 
 1. Make sure `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json` contain the same version.
-2. Run `pnpm install --frozen-lockfile`, `pnpm build`, and `cargo test --manifest-path src-tauri/Cargo.toml`.
-3. Commit the release changes.
-4. Create and push a matching tag, such as `v0.3.0`.
-5. Watch the **Publish signed desktop release** workflow.
-6. Confirm the GitHub Release contains `latest.json`, signed macOS and Debian updater artifacts, and the Raspberry Pi manual bootstrap archive with its checksum and signature.
-7. Test **Writer (Aa) → Application updates → Check for Updates…** on each installed platform before relying on automatic checks.
+2. Update the release notes in `.github/workflows/release.yml` for the version being published.
+3. Run `pnpm install --frozen-lockfile`, `pnpm build`, and `cargo test --manifest-path src-tauri/Cargo.toml`.
+4. Commit the release changes.
+5. Create and push a matching tag, such as `v0.3.1`.
+6. Watch the **Publish signed desktop release** workflow.
+7. Confirm the GitHub Release contains `latest.json`, signed macOS and Debian updater artifacts, and the Raspberry Pi manual bootstrap archive with its checksum and signature.
+8. Test **Writer (Aa) → Application updates → Check for Updates…** on each installed platform before relying on automatic checks.
 
 GitHub's public ARM64 runner creates the Raspberry Pi Debian package natively. The manual Pi archive contains the executable extracted from that Debian bundle, allowing the bootstrap installation to identify future updates as Debian packages.
 

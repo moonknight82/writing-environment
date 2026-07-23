@@ -40,6 +40,8 @@ The v0.1 desktop vertical slice and dedicated Raspberry Pi appliance image are c
 
 Version 0.3.0 is the updater bootstrap release. Install it manually once on each machine; later releases can be checked from **Writer (Aa) → Application updates → Check for Updates…**. Automatic checks are enabled by default, run at most once per day, and never install or restart without confirmation.
 
+Version 0.3.1 is the first updater-delivered maintenance release. It corrects writing-focus text wrapping on macOS when the editor has a visible scrollbar, including long Markdown paragraphs created on Raspberry Pi.
+
 Update artifacts and `latest.json` are published through [GitHub Releases](https://github.com/moonknight82/writing-environment/releases). Every application update is verified with Tauri's embedded public signing key before installation. The private key is held only in the repository's GitHub Actions secrets. macOS uses a signed Tauri application archive; Linux amd64 and Raspberry Pi use signed Debian packages and request system authorization when installation begins.
 
 Application updates do not modify Raspberry Pi OS, desktop settings, rclone configuration, projects, or recovery data. Appliance-level changes remain separate, deliberate updates or full-image releases.
