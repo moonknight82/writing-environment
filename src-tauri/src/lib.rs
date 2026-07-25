@@ -1467,7 +1467,8 @@ pub fn run() {
             project_watch::watch_library,
             project_watch::unwatch_library,
             sync::sync_availability,
-            sync::sync_project
+            sync::sync_project,
+            sync::recover_sync_project,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Writing Environment");

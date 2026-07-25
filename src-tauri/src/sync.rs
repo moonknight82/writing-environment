@@ -64,6 +64,24 @@ pub async fn sync_project(
     .map_err(|error| format!("The sync worker stopped unexpectedly: {error}"))?
 }
 
+#[tauri::command]
+pub async fn recover_sync_project(
+    app: tauri::AppHandle,
+    root: String,
+    remote: String,
+    remote_path: String,
+    restore_to: String,
+) -> Result<SyncResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = SYNC_LOCK
+            .try_lock()
+            .map_err(|_| "A sync is already running.".to_string())?;
+        recover_sync_project_blocking(&app, &root, &remote, &remote_path, &restore_to)
+    })
+    .await
+    .map_err(|error| format!("The sync recovery worker stopped unexpectedly: {error}"))?
+}
+
 fn sync_project_blocking(
     app: &tauri::AppHandle,
     root: &str,
@@ -150,6 +168,114 @@ fn sync_project_blocking(
     })
 }
 
+fn recover_sync_project_blocking(
+    app: &tauri::AppHandle,
+    root: &str,
+    remote: &str,
+    remote_path: &str,
+    restore_to: &str,
+) -> Result<SyncResult, String> {
+    let availability = availability_for("rclone");
+    if !availability.compatible {
+        return Err(availability.message);
+    }
+    let remote = normalize_remote(remote)?;
+    if !availability.remotes.iter().any(|item| item == &remote) {
+        return Err(format!(
+            "The rclone remote ‘{remote}’ is not configured. Run ‘rclone config’ and refresh remotes."
+        ));
+    }
+    let remote_path = normalize_remote_path(remote_path)?;
+    let canonical_root = fs::canonicalize(root)
+        .map_err(|error| format!("Cannot open the project folder: {error}"))?;
+    if !canonical_root.is_dir() {
+        return Err("The project path is not a folder.".into());
+    }
+
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Cannot locate the app data folder: {error}"))?;
+    let profile = sync_profile_dir(&app_data, &canonical_root, &remote, &remote_path);
+    let workdir = profile.join("work");
+    let local_backup = profile.join("local-backups");
+    let state_file = profile.join("state");
+    let phase = fs::read_to_string(&state_file).unwrap_or_default();
+    if phase.trim() != "initialized" {
+        return Err(
+            "This sync has not been initialized, so deletion recovery is unavailable.".into(),
+        );
+    }
+    fs::create_dir_all(&workdir)
+        .and_then(|_| fs::create_dir_all(&local_backup))
+        .map_err(|error| format!("Cannot prepare sync recovery state: {error}"))?;
+
+    let remote_target = format!("{remote}:{remote_path}");
+    let archive_target = format!("{remote}:{}", remote_archive_path(&remote_path));
+    ensure_access_marker(&canonical_root)?;
+    run_rclone(
+        &recovery_copy_args(&canonical_root, &remote_target, restore_to)?,
+        COMMAND_TIMEOUT,
+    )?;
+    run_bisync(
+        &canonical_root,
+        &remote_target,
+        &archive_target,
+        &workdir,
+        &local_backup,
+        false,
+    )?;
+
+    let conflicts = count_conflicts(&canonical_root);
+    let (status, message) = if conflicts > 0 {
+        (
+            "conflict".to_string(),
+            format!(
+                "Missing files were restored without overwriting existing files. Sync then preserved {conflicts} conflict file{}. Review files marked ‘{CONFLICT_SUFFIX}’.",
+                if conflicts == 1 { "" } else { "s" }
+            ),
+        )
+    } else {
+        (
+            "synced".to_string(),
+            "Missing files were restored without overwriting existing files. The project is synced; automatic sync remains off until you re-enable it."
+                .to_string(),
+        )
+    };
+    Ok(SyncResult {
+        status,
+        message,
+        conflicts,
+        initialized: true,
+        completed_at: Utc::now().to_rfc3339(),
+    })
+}
+
+fn recovery_copy_args(
+    root: &Path,
+    remote_target: &str,
+    restore_to: &str,
+) -> Result<Vec<String>, String> {
+    let local = root.to_string_lossy().into_owned();
+    let (source, destination) = match restore_to {
+        "local" => (remote_target.to_string(), local),
+        "remote" => (local, remote_target.to_string()),
+        _ => return Err("Choose whether to restore missing files locally or remotely.".into()),
+    };
+    Ok(vec![
+        "copy".into(),
+        source,
+        destination,
+        "--ignore-existing".into(),
+        "--create-empty-src-dirs".into(),
+        "--check-first".into(),
+        "--checkers".into(),
+        "4".into(),
+        "--transfers".into(),
+        "2".into(),
+    ])
+}
+
 fn initialize_sync(
     root: &Path,
     remote_target: &str,
@@ -228,6 +354,24 @@ fn run_bisync(
         COMMAND_TIMEOUT,
     )
     .map(|_| ())
+    .map_err(classify_bisync_error)
+}
+
+fn classify_bisync_error(error: String) -> String {
+    if !error.contains("Safety abort: too many deletes") {
+        return error;
+    }
+    if error.contains("Path1") {
+        return format!(
+            "SYNC_DELETE_GUARD_LOCAL: More than 25% of tracked files are missing locally. {error}"
+        );
+    }
+    if error.contains("Path2") {
+        return format!(
+            "SYNC_DELETE_GUARD_REMOTE: More than 25% of tracked files are missing remotely. {error}"
+        );
+    }
+    error
 }
 
 fn bisync_args(
@@ -538,6 +682,38 @@ mod tests {
         assert!(normalize_remote_path("../Novel").is_err());
         assert!(normalize_remote_path("dropbox:Novel").is_err());
         assert!(normalize_remote_path("").is_err());
+    }
+
+    #[test]
+    fn classifies_delete_guard_by_protected_side() {
+        let local = classify_bisync_error(
+            "Sync failed: Safety abort: too many deletes (>25%, 2 of 3) on Path1".into(),
+        );
+        let remote = classify_bisync_error(
+            "Sync failed: Safety abort: too many deletes (>25%, 2 of 3) on Path2".into(),
+        );
+
+        assert!(local.starts_with("SYNC_DELETE_GUARD_LOCAL:"));
+        assert!(remote.starts_with("SYNC_DELETE_GUARD_REMOTE:"));
+        assert_eq!(
+            classify_bisync_error("Sync failed: network unavailable".into()),
+            "Sync failed: network unavailable"
+        );
+    }
+
+    #[test]
+    fn recovery_copy_restores_only_missing_files_in_the_safe_direction() {
+        let root = Path::new("/project");
+        let local = recovery_copy_args(root, "dropbox:Novel", "local").expect("local recovery");
+        let remote = recovery_copy_args(root, "dropbox:Novel", "remote").expect("remote recovery");
+
+        assert_eq!(&local[1..3], &["dropbox:Novel", "/project"]);
+        assert_eq!(&remote[1..3], &["/project", "dropbox:Novel"]);
+        for args in [&local, &remote] {
+            assert!(args.iter().any(|argument| argument == "--ignore-existing"));
+            assert!(!args.iter().any(|argument| argument == "--force"));
+            assert!(!args.iter().any(|argument| argument == "--resync"));
+        }
     }
 
     #[test]

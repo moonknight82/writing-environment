@@ -35,7 +35,7 @@ The interface keeps a persistent registry of every project the writer has opened
 
 ## Synchronization boundary
 
-The app coordinates `rclone bisync`; it does not implement Dropbox OAuth or embed cloud credentials. Provider configuration remains in rclone's user configuration. Each project/remote pair receives an isolated work directory under the app-data folder, outside the Markdown project.
+The app coordinates `rclone bisync`; it does not implement Dropbox OAuth or embed cloud credentials. Provider configuration remains in rclone's user configuration. Each project/remote pair receives an isolated work directory under the app-data folder, outside the Markdown project. Bisync retains a 25% maximum-deletion guard. If that guard fires, the app persists a paused state and turns off automatic sync. Recovery copies only missing files toward the guarded side with `--ignore-existing`, then resumes normal conflict-preserving bisync; it never applies `--force` or an automatic authoritative resync.
 
 First-time setup accepts only an empty remote folder and copies the local project into it. Recurring runs use an access marker, resilient recovery, a deletion ceiling, and non-overlapping local and remote backup directories. When both sides change the same sheet, both versions are retained with `writing-environment-conflict` in the Markdown filename so they remain visible in the sheet list.
 

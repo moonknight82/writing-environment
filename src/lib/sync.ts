@@ -27,3 +27,12 @@ export function syncProject(
 ): Promise<SyncResult> {
   return invoke<SyncResult>("sync_project", { root, remote, remotePath });
 }
+
+export function recoverProjectSync(
+  root: string,
+  remote: string,
+  remotePath: string,
+  restoreTo: "local" | "remote",
+): Promise<SyncResult> {
+  return invoke<SyncResult>("recover_sync_project", { root, remote, remotePath, restoreTo });
+}

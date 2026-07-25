@@ -35,6 +35,7 @@
   } from "./lib/library";
   import {
     getSyncAvailability,
+    recoverProjectSync,
     syncProject,
     type SyncAvailability,
   } from "./lib/sync";
@@ -77,6 +78,7 @@
     remotePath: string;
     automatic: boolean;
     initialized: boolean;
+    recoveryTarget: SyncRecoveryTarget | null;
   }
 
   interface LibraryFilesChanged {
@@ -84,6 +86,7 @@
   }
 
   type SyncPhase = "local" | "ready" | "syncing" | "synced" | "conflict" | "error";
+  type SyncRecoveryTarget = "local" | "remote";
 
   const UPDATE_CHECK_INTERVAL = 24 * 60 * 60 * 1000;
 
@@ -247,6 +250,7 @@ It passed the abandoned signal house before descending between black pines to th
   let syncPhase: SyncPhase = "local";
   let syncStatus = "Local only";
   let syncMessage = "";
+  let syncRecoveryTarget: SyncRecoveryTarget | null = null;
   let syncPreference: SyncPreference = emptySyncPreference();
   let syncDraftRemote = "";
   let syncDraftPath = "";
@@ -271,7 +275,7 @@ It passed the abandoned signal house before descending between black pines to th
   let externalConflictPath: string | null = null;
   let externalDiskContent: string | null = null;
   let resolvingExternalConflict = false;
-  let appVersion = "0.4.1";
+  let appVersion = "0.4.2";
   let automaticUpdateChecks = true;
   let updateVisible = false;
   let updateChecking = false;
@@ -1136,7 +1140,7 @@ It passed the abandoned signal house before descending between black pines to th
     refreshingSync = true;
     try {
       syncAvailability = await getSyncAvailability();
-      syncMessage = syncAvailability.message;
+      if (!syncRecoveryTarget) syncMessage = syncAvailability.message;
       if (!syncDraftRemote && syncAvailability.remotes.length > 0) {
         syncDraftRemote = syncAvailability.remotes[0];
       }
@@ -1181,12 +1185,14 @@ It passed the abandoned signal house before descending between black pines to th
         remotePath,
         automatic: identityChanged ? false : syncPreference.automatic,
         initialized: identityChanged ? false : syncPreference.initialized,
+        recoveryTarget: identityChanged ? null : syncPreference.recoveryTarget,
       };
       saveProjectSyncPreference();
       syncMessage = syncPreference.initialized ? "Comparing both copies…" : "Initializing the remote folder…";
 
       const result = await syncProject(libraryPath, remote, remotePath);
-      syncPreference = { ...syncPreference, initialized: result.initialized };
+      syncRecoveryTarget = null;
+      syncPreference = { ...syncPreference, initialized: result.initialized, recoveryTarget: null };
       syncDraftRemote = remote;
       syncDraftPath = remotePath;
       saveProjectSyncPreference();
@@ -1196,17 +1202,74 @@ It passed the abandoned signal house before descending between black pines to th
       await reloadLibrary(activeSheetPath, true);
       errorMessage = "";
     } catch (error) {
+      const deletionGuard = syncDeletionGuard(errorText(error));
       syncPhase = "error";
-      syncStatus = "Sync needs attention";
-      syncMessage = error instanceof Error ? error.message : String(error);
+      syncRecoveryTarget = deletionGuard;
+      if (deletionGuard) {
+        syncPreference = { ...syncPreference, automatic: false, recoveryTarget: deletionGuard };
+        saveProjectSyncPreference();
+        syncStatus = "Sync safely paused";
+        syncMessage = deletionGuard === "local"
+          ? "No files were changed. More than 25% of the tracked files are missing from this project folder, so automatic sync was turned off."
+          : "No files were changed. More than 25% of the tracked files are missing from the remote folder, so automatic sync was turned off.";
+      } else {
+        syncStatus = "Sync needs attention";
+        syncMessage = errorText(error);
+      }
       if (automatic) errorMessage = syncMessage;
     } finally {
       syncRunning = false;
     }
   }
 
+  async function recoverPausedSync(): Promise<void> {
+    if (!libraryPath || !syncRecoveryTarget || syncRunning) return;
+    const projectPath = libraryPath;
+    const remote = syncPreference.remote;
+    const remotePath = syncPreference.remotePath;
+    if (!remote || !remotePath) return;
+
+    syncRunning = true;
+    syncPhase = "syncing";
+    syncStatus = "Recovering safely…";
+    syncMessage = syncRecoveryTarget === "local"
+      ? "Restoring remote-only files to this project without overwriting local files…"
+      : "Restoring local-only files to the remote without overwriting remote files…";
+    try {
+      if (dirty) await persistCurrentSheet();
+      if (dirty) throw new Error("The current sheet could not be saved, so recovery did not start.");
+      const result = await recoverProjectSync(
+        projectPath,
+        remote,
+        remotePath,
+        syncRecoveryTarget,
+      );
+      if (libraryPath !== projectPath) return;
+      syncRecoveryTarget = null;
+      syncPreference = {
+        ...syncPreference,
+        initialized: result.initialized,
+        automatic: false,
+        recoveryTarget: null,
+      };
+      saveProjectSyncPreference();
+      syncPhase = result.status;
+      syncStatus = result.status === "conflict" ? "Conflicts preserved" : "Recovered and synced";
+      syncMessage = result.message;
+      await reloadLibrary(activeSheetPath, true);
+      errorMessage = "";
+    } catch (error) {
+      syncPhase = "error";
+      syncStatus = "Recovery needs attention";
+      syncMessage = errorText(error);
+      errorMessage = syncMessage;
+    } finally {
+      syncRunning = false;
+    }
+  }
+
   function setAutomaticSync(enabled: boolean): void {
-    if (!syncPreference.initialized) return;
+    if (!syncPreference.initialized || syncRecoveryTarget) return;
     syncPreference = { ...syncPreference, automatic: enabled };
     saveProjectSyncPreference();
     syncStatus = enabled ? "Automatic sync on" : "Ready to sync";
@@ -1244,6 +1307,12 @@ It passed the abandoned signal house before descending between black pines to th
       ? syncPreference.automatic ? "Automatic sync on" : "Ready to sync"
       : "Local only";
     syncMessage = "";
+    syncRecoveryTarget = syncPreference.recoveryTarget ?? null;
+    if (syncRecoveryTarget) {
+      syncPhase = "error";
+      syncStatus = "Sync safely paused";
+      syncMessage = "Deletion protection previously paused this project. Restore the missing files or leave sync off.";
+    }
   }
 
   function saveProjectSyncPreference(): void {
@@ -1268,7 +1337,19 @@ It passed the abandoned signal house before descending between black pines to th
   }
 
   function emptySyncPreference(): SyncPreference {
-    return { remote: "", remotePath: "", automatic: false, initialized: false };
+    return {
+      remote: "",
+      remotePath: "",
+      automatic: false,
+      initialized: false,
+      recoveryTarget: null,
+    };
+  }
+
+  function syncDeletionGuard(message: string): SyncRecoveryTarget | null {
+    if (message.startsWith("SYNC_DELETE_GUARD_LOCAL:")) return "local";
+    if (message.startsWith("SYNC_DELETE_GUARD_REMOTE:")) return "remote";
+    return null;
   }
 
   function safeRemoteFolderName(value: string): string {
@@ -2256,7 +2337,7 @@ It passed the abandoned signal house before descending between black pines to th
           >
             <span class="sync-symbol" aria-hidden="true">↕</span>
             <span>Sync</span>
-            <small>{syncRunning ? "Working" : syncPreference.automatic ? "Auto" : syncPreference.initialized ? "Ready" : "Off"}</small>
+            <small>{syncRunning ? "Working" : syncRecoveryTarget ? "Paused" : syncPreference.automatic ? "Auto" : syncPreference.initialized ? "Ready" : "Off"}</small>
           </button>
 
           {#if syncMenuVisible}
@@ -2306,9 +2387,24 @@ It passed the abandoned signal house before descending between black pines to th
                   <p class="sync-safety-note"><strong>First sync:</strong> this remote folder must be empty. The local project becomes its starting copy.</p>
                 {/if}
 
+                {#if syncRecoveryTarget}
+                  <div class="sync-recovery-note">
+                    <strong>Deletion protection stopped sync.</strong>
+                    <p>{syncRecoveryTarget === "local"
+                      ? "Restore only files that exist remotely but are missing from this project. Existing local files will not be replaced."
+                      : "Restore only files that exist locally but are missing remotely. Existing remote files will not be replaced."}</p>
+                    <button
+                      class="sync-primary"
+                      disabled={syncRunning}
+                      onclick={() => void recoverPausedSync()}
+                    >{syncRecoveryTarget === "local" ? "Restore missing local files" : "Restore missing remote files"}</button>
+                    <small>Automatic sync will remain off until you turn it back on.</small>
+                  </div>
+                {/if}
+
                 <button
                   class="sync-primary"
-                  disabled={syncRunning || !syncAvailability?.compatible || !syncDraftRemote || !syncDraftPath.trim()}
+                  disabled={syncRunning || !!syncRecoveryTarget || !syncAvailability?.compatible || !syncDraftRemote || !syncDraftPath.trim()}
                   onclick={() => void runProjectSync(false)}
                 >{syncRunning ? "Syncing…" : syncNeedsInitialization ? "Initialize sync" : "Sync now"}</button>
 
@@ -2320,7 +2416,7 @@ It passed the abandoned signal house before descending between black pines to th
                   <input
                     type="checkbox"
                     checked={syncPreference.automatic}
-                    disabled={syncNeedsInitialization || syncRunning}
+                    disabled={syncNeedsInitialization || syncRunning || !!syncRecoveryTarget}
                     onchange={(event) => setAutomaticSync(event.currentTarget.checked)}
                   />
                 </label>

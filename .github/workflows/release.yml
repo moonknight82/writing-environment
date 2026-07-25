@@ -114,9 +114,9 @@ jobs:
         with:
           releaseId: ${{ needs.prepare-release.outputs.release_id }}
           releaseBody: |
-            Fixes project switching so every open project remains in the sidebar until it is explicitly closed. Each project remembers its last selected sheet, and the Move dialog can transfer a sheet to a nested folder in any other open project.
+            Turns rclone's excessive-deletion safety abort into a clear, persistent recovery state. If more than 25% of tracked files appear missing locally or remotely, the app confirms that no changes were made, switches off automatic sync for that project, and identifies which side needs recovery.
 
-            Cross-project moves write and verify a durable destination copy before removing the source. A Markdown file containing invalid UTF-8 bytes no longer prevents its entire project from opening: the application leaves that file untouched, skips it, and names it in a clear warning so it can be converted or restored safely.
+            The recovery action restores only files missing from the guarded side using rclone's --ignore-existing behavior, then resumes normal conflict-preserving bisync. Existing files are never overwritten, no deletion is forced, and automatic sync remains off until the writer deliberately re-enables it.
 
             Signed desktop release for macOS Apple Silicon, Linux amd64, and Raspberry Pi ARM64.
 
