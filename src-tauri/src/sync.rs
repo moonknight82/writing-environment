@@ -1,3 +1,4 @@
+use super::{atomic_replace, is_markdown, read_unicode_markdown_file, sync_file_and_parent};
 use chrono::Utc;
 use serde::Serialize;
 use std::fs::{self, OpenOptions};
@@ -136,6 +137,11 @@ fn sync_project_blocking(
         )?;
     } else {
         ensure_access_marker(&canonical_root)?;
+        let repaired_unreadable = repair_unreadable_local_markdown(
+            &canonical_root,
+            &remote_target,
+            &profile.join("unreadable-backups"),
+        )?;
         run_bisync(
             &canonical_root,
             &remote_target,
@@ -144,28 +150,44 @@ fn sync_project_blocking(
             &local_backup,
             false,
         )?;
+
+        let conflicts = count_conflicts(&canonical_root);
+        return Ok(sync_result(conflicts, repaired_unreadable));
     }
 
     let conflicts = count_conflicts(&canonical_root);
+    Ok(sync_result(conflicts, 0))
+}
+
+fn sync_result(conflicts: usize, repaired_unreadable: usize) -> SyncResult {
+    let repaired_message = match repaired_unreadable {
+        0 => String::new(),
+        1 => " One unreadable local Markdown file was safely restored from the remote copy; its original bytes remain in recovery data.".to_string(),
+        count => format!(
+            " {count} unreadable local Markdown files were safely restored from their remote copies; the original bytes remain in recovery data."
+        ),
+    };
     let (status, message) = if conflicts > 0 {
         (
             "conflict".to_string(),
             format!(
-                "Synced with {conflicts} preserved conflict file{}. Review the files marked ‘{CONFLICT_SUFFIX}’.",
-                if conflicts == 1 { "" } else { "s" }
+                "Synced with {conflicts} preserved conflict file{}. Review the files marked ‘{CONFLICT_SUFFIX}’.{repaired_message}",
+                if conflicts == 1 { "" } else { "s" },
             ),
         )
     } else {
-        ("synced".to_string(), "All changes are synced.".to_string())
+        (
+            "synced".to_string(),
+            format!("All changes are synced.{repaired_message}"),
+        )
     };
-
-    Ok(SyncResult {
+    SyncResult {
         status,
         message,
         conflicts,
         initialized: true,
         completed_at: Utc::now().to_rfc3339(),
-    })
+    }
 }
 
 fn recover_sync_project_blocking(
@@ -217,6 +239,11 @@ fn recover_sync_project_blocking(
         &recovery_copy_args(&canonical_root, &remote_target, restore_to)?,
         COMMAND_TIMEOUT,
     )?;
+    let repaired_unreadable = repair_unreadable_local_markdown(
+        &canonical_root,
+        &remote_target,
+        &profile.join("unreadable-backups"),
+    )?;
     run_bisync(
         &canonical_root,
         &remote_target,
@@ -227,19 +254,25 @@ fn recover_sync_project_blocking(
     )?;
 
     let conflicts = count_conflicts(&canonical_root);
+    let repaired_message = match repaired_unreadable {
+        0 => String::new(),
+        1 => " One unreadable local Markdown file was also restored from the remote copy; its original bytes remain in recovery data.".to_string(),
+        count => format!(
+            " {count} unreadable local Markdown files were also restored from their remote copies; the original bytes remain in recovery data."
+        ),
+    };
     let (status, message) = if conflicts > 0 {
         (
             "conflict".to_string(),
             format!(
-                "Missing files were restored without overwriting existing files. Sync then preserved {conflicts} conflict file{}. Review files marked ‘{CONFLICT_SUFFIX}’.",
-                if conflicts == 1 { "" } else { "s" }
+                "Missing files were restored without overwriting existing files. Sync then preserved {conflicts} conflict file{}. Review files marked ‘{CONFLICT_SUFFIX}’.{repaired_message}",
+                if conflicts == 1 { "" } else { "s" },
             ),
         )
     } else {
         (
             "synced".to_string(),
-            "Missing files were restored without overwriting existing files. The project is synced; automatic sync remains off until you re-enable it."
-                .to_string(),
+            format!("Missing files were restored without overwriting existing files. The project is synced; automatic sync remains off until you re-enable it.{repaired_message}"),
         )
     };
     Ok(SyncResult {
@@ -249,6 +282,105 @@ fn recover_sync_project_blocking(
         initialized: true,
         completed_at: Utc::now().to_rfc3339(),
     })
+}
+
+fn repair_unreadable_local_markdown(
+    root: &Path,
+    remote_target: &str,
+    backup_root: &Path,
+) -> Result<usize, String> {
+    let unreadable = WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file() && is_markdown(entry.path()))
+        .filter(|entry| read_unicode_markdown_file(entry.path()).is_err())
+        .map(|entry| entry.into_path())
+        .collect::<Vec<_>>();
+    let mut repaired = 0;
+
+    for local_path in unreadable {
+        let relative = local_path
+            .strip_prefix(root)
+            .map_err(|_| "An unreadable sheet resolved outside the project.".to_string())?;
+        let remote_file = remote_markdown_target(remote_target, relative)?;
+        let temporary = NamedTempFile::new()
+            .map_err(|error| format!("Cannot prepare an unreadable-sheet recovery: {error}"))?;
+        let copy_result = run_rclone(
+            &unreadable_recovery_copy_args(remote_file, temporary.path()),
+            COMMAND_TIMEOUT,
+        );
+        if copy_result.is_err() || read_unicode_markdown_file(temporary.path()).is_err() {
+            continue;
+        }
+
+        let timestamp = Utc::now().format("%Y%m%dT%H%M%S%.3fZ");
+        let relative_parent = relative.parent().unwrap_or_else(|| Path::new(""));
+        let backup_parent = backup_root
+            .join(timestamp.to_string())
+            .join(relative_parent);
+        let backup_name = format!(
+            "{}.bin",
+            relative
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("unreadable.md")
+        );
+        let backup = backup_parent.join(backup_name);
+        preserve_and_replace_unreadable(&local_path, temporary.path(), &backup)?;
+        repaired += 1;
+    }
+
+    Ok(repaired)
+}
+
+fn unreadable_recovery_copy_args(remote_file: String, temporary: &Path) -> Vec<String> {
+    vec![
+        "copyto".into(),
+        remote_file,
+        temporary.to_string_lossy().into_owned(),
+        "--check-first".into(),
+        "--ignore-times".into(),
+    ]
+}
+
+fn preserve_and_replace_unreadable(
+    local_path: &Path,
+    recovered_path: &Path,
+    backup_path: &Path,
+) -> Result<(), String> {
+    read_unicode_markdown_file(recovered_path)
+        .map_err(|_| "The remote recovery copy is not readable Markdown text.".to_string())?;
+    let backup_parent = backup_path
+        .parent()
+        .ok_or_else(|| "The unreadable-sheet backup has no parent folder.".to_string())?;
+    fs::create_dir_all(backup_parent)
+        .map_err(|error| format!("Cannot preserve an unreadable local sheet: {error}"))?;
+    fs::copy(local_path, backup_path)
+        .map_err(|error| format!("Cannot preserve an unreadable local sheet: {error}"))?;
+    sync_file_and_parent(backup_path)?;
+
+    let remote_bytes = fs::read(recovered_path)
+        .map_err(|error| format!("Cannot read the recovered remote sheet: {error}"))?;
+    atomic_replace(local_path, &remote_bytes)
+}
+
+fn remote_markdown_target(remote_target: &str, relative: &Path) -> Result<String, String> {
+    let relative = relative
+        .components()
+        .map(|component| match component {
+            std::path::Component::Normal(value) => value
+                .to_str()
+                .map(str::to_string)
+                .ok_or_else(|| "A Markdown filename is not valid Unicode.".to_string()),
+            _ => Err("A Markdown path escaped its project folder.".to_string()),
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .join("/");
+    Ok(format!(
+        "{}/{relative}",
+        remote_target.trim_end_matches('/')
+    ))
 }
 
 fn recovery_copy_args(
@@ -714,6 +846,44 @@ mod tests {
             assert!(!args.iter().any(|argument| argument == "--force"));
             assert!(!args.iter().any(|argument| argument == "--resync"));
         }
+    }
+
+    #[test]
+    fn unreadable_recovery_preserves_original_bytes_before_atomic_replacement() {
+        let root = tempfile::tempdir().expect("temporary recovery");
+        let local = root.path().join("one.md");
+        let recovered = root.path().join("remote-one.md");
+        let backup = root.path().join("recovery").join("one.md.bin");
+        let corrupt = [0x00, 0x01, 0x02, 0xff];
+        fs::write(&local, corrupt).expect("unreadable local sheet");
+        fs::write(&recovered, "# One\n\nThe remote text — intact.").expect("valid remote sheet");
+
+        preserve_and_replace_unreadable(&local, &recovered, &backup).expect("safe recovery");
+
+        assert_eq!(fs::read(&backup).expect("preserved bytes"), corrupt);
+        assert_eq!(
+            fs::read_to_string(&local).expect("restored local sheet"),
+            "# One\n\nThe remote text — intact."
+        );
+    }
+
+    #[test]
+    fn unreadable_recovery_maps_nested_paths_to_the_same_remote_file() {
+        assert_eq!(
+            remote_markdown_target(
+                "dropbox:Writing Environment/The arrival",
+                Path::new("Draft/one.md"),
+            ),
+            Ok("dropbox:Writing Environment/The arrival/Draft/one.md".into())
+        );
+        assert!(remote_markdown_target("dropbox:Novel", Path::new("../outside.md")).is_err());
+
+        let args = unreadable_recovery_copy_args(
+            "dropbox:Writing Environment/The arrival/Draft/one.md".into(),
+            Path::new("/tmp/recovered"),
+        );
+        assert_eq!(args[0], "copyto");
+        assert!(args.iter().any(|argument| argument == "--ignore-times"));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use tauri::Manager;
 use tempfile::NamedTempFile;
@@ -113,6 +113,36 @@ struct LibraryScan {
     warnings: Vec<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MarkdownEncoding {
+    Utf8,
+    Utf8Bom,
+    Utf16Le,
+    Utf16Be,
+    Utf32Le,
+    Utf32Be,
+    Windows1252,
+}
+
+impl MarkdownEncoding {
+    fn display_name(self) -> Option<&'static str> {
+        match self {
+            Self::Utf8 => None,
+            Self::Utf8Bom => Some("UTF-8 with a byte-order mark"),
+            Self::Utf16Le => Some("UTF-16 little-endian"),
+            Self::Utf16Be => Some("UTF-16 big-endian"),
+            Self::Utf32Le => Some("UTF-32 little-endian"),
+            Self::Utf32Be => Some("UTF-32 big-endian"),
+            Self::Windows1252 => Some("Windows-1252"),
+        }
+    }
+}
+
+struct MarkdownText {
+    content: String,
+    encoding: MarkdownEncoding,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SheetSummary {
@@ -202,16 +232,19 @@ fn scan_library_sheets(root: &Path) -> Result<LibraryScan, String> {
         let relative = file_path
             .strip_prefix(root)
             .map_err(|_| "A sheet resolved outside the library.".to_string())?;
-        let content = match fs::read_to_string(file_path) {
-            Ok(content) => content,
+        let document = match read_markdown_file(file_path) {
+            Ok(document) => document,
             Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
                 warnings.push(invalid_utf8_warning(relative));
                 continue;
             }
             Err(error) => return Err(format!("Cannot read {}: {error}", relative.display())),
         };
+        if let Some(warning) = legacy_encoding_warning(relative, document.encoding) {
+            warnings.push(warning);
+        }
 
-        sheets.push(summarize_sheet(file_path, relative, &content));
+        sheets.push(summarize_sheet(file_path, relative, &document.content));
     }
 
     sheets.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
@@ -245,10 +278,10 @@ fn save_sheet(
     expected_content: String,
 ) -> Result<String, String> {
     let target = resolve_existing_sheet(&root, &relative_path)?;
-    let existing = fs::read_to_string(&target)
+    let existing = read_markdown_file(&target)
         .map_err(|error| format!("Cannot read sheet before saving: {error}"))?;
-    ensure_expected_sheet_version(&existing, &expected_content)?;
-    let created_at = sheet_created_at(&target, &existing);
+    ensure_expected_sheet_version(&existing.content, &expected_content)?;
+    let created_at = sheet_created_at(&target, &existing.content);
     let content = if frontmatter_field(&content, "created").is_some() {
         content
     } else {
@@ -311,10 +344,10 @@ fn list_sheet_revisions(
 ) -> Result<Vec<RevisionSummary>, String> {
     let canonical_root = canonical_library_root(&root)?;
     let target = resolve_existing_sheet(&root, &relative_path)?;
-    let current = fs::read_to_string(&target)
+    let current = read_markdown_file(&target)
         .map_err(|error| format!("Cannot read the current sheet: {error}"))?;
     let revision_dir = revision_dir_for(&app, &canonical_root, &relative_path)?;
-    list_revisions_from(&revision_dir, &current)
+    list_revisions_from(&revision_dir, &current.content)
 }
 
 #[tauri::command]
@@ -372,9 +405,9 @@ fn rename_sheet(
     let canonical_root = canonical_library_root(&root)?;
     let target = resolve_existing_sheet(&root, &relative_path)?;
     let title = validated_title(&title)?;
-    let content = fs::read_to_string(&target)
+    let content = read_markdown_file(&target)
         .map_err(|error| format!("Cannot read sheet before renaming: {error}"))?;
-    let updated = set_document_title(&content, &title)?;
+    let updated = set_document_title(&content.content, &title)?;
     snapshot_existing_sheet(&app, &target, &root, &relative_path)?;
 
     let parent = target
@@ -412,9 +445,9 @@ fn duplicate_sheet(
     let canonical_root = canonical_library_root(&root)?;
     let source = resolve_existing_sheet(&root, &relative_path)?;
     let title = validated_title(&title)?;
-    let content = fs::read_to_string(&source)
+    let content = read_markdown_file(&source)
         .map_err(|error| format!("Cannot read sheet before duplicating: {error}"))?;
-    let with_title = set_document_title(&content, &title)?;
+    let with_title = set_document_title(&content.content, &title)?;
     let duplicated = set_document_id(&with_title, &Uuid::new_v4().to_string())?;
     let duplicated = set_frontmatter_field(&duplicated, "created", &Utc::now().to_rfc3339())
         .unwrap_or(duplicated);
@@ -494,7 +527,7 @@ fn move_sheet_between_projects_on_disk(
     let target = unique_markdown_path(&parent, stem);
     let content = fs::read(&source)
         .map_err(|error| format!("Cannot read sheet before moving it: {error}"))?;
-    std::str::from_utf8(&content).map_err(|_| invalid_utf8_warning(Path::new(relative_path)))?;
+    decode_markdown_bytes(&content).map_err(|_| invalid_utf8_warning(Path::new(relative_path)))?;
 
     create_new_file(&target, &content)?;
     let copied = fs::read(&target)
@@ -562,12 +595,12 @@ fn trash_sheet(app: tauri::AppHandle, root: String, relative_path: String) -> Re
 }
 
 fn trash_sheet_into(root: &Path, source: &Path, trash: &Path) -> Result<(), String> {
-    let content = fs::read_to_string(source)
+    let content = read_markdown_file(source)
         .map_err(|error| format!("Cannot read sheet before moving it to Trash: {error}"))?;
     let id = Uuid::new_v4().to_string();
     let item = TrashItem {
         id: id.clone(),
-        title: sheet_title(&content, source),
+        title: sheet_title(&content.content, source),
         original_relative_path: path_for_frontend(
             source
                 .strip_prefix(root)
@@ -758,8 +791,8 @@ fn search_library_by_scan(root: &Path, query: &str) -> Result<Vec<SheetSummary>,
         if !entry.file_type().is_file() || !is_markdown(entry.path()) {
             continue;
         }
-        let content = match fs::read_to_string(entry.path()) {
-            Ok(content) => content,
+        let content = match read_markdown_file(entry.path()) {
+            Ok(document) => document.content,
             Err(error) if error.kind() == std::io::ErrorKind::InvalidData => continue,
             Err(error) => return Err(format!("Cannot search {}: {error}", entry.path().display())),
         };
@@ -921,9 +954,9 @@ fn summarize_existing(root: &Path, target: &Path) -> Result<SheetSummary, String
     let relative = target
         .strip_prefix(root)
         .map_err(|_| "The sheet is outside the selected library.".to_string())?;
-    let content = fs::read_to_string(target)
+    let content = read_markdown_file(target)
         .map_err(|error| format!("Cannot read sheet metadata: {error}"))?;
-    Ok(summarize_sheet(target, relative, &content))
+    Ok(summarize_sheet(target, relative, &content.content))
 }
 
 fn set_document_title(content: &str, title: &str) -> Result<String, String> {
@@ -1137,8 +1170,8 @@ fn list_revisions_from(
         .filter_map(|entry| {
             let id = entry.file_name().to_str()?.to_string();
             validated_revision_path(revision_dir, &id).ok()?;
-            let content = fs::read_to_string(entry.path()).ok()?;
-            let body = markdown_body(&content);
+            let content = read_markdown_file(&entry.path()).ok()?;
+            let body = markdown_body(&content.content);
             let word_count = body.split_whitespace().count();
             Some(RevisionSummary {
                 created_at: revision_created_at(&id, &entry).to_rfc3339(),
@@ -1186,7 +1219,9 @@ fn read_revision_from(revision_dir: &Path, revision_id: &str) -> Result<String, 
     if !revision.is_file() {
         return Err("That revision is no longer available.".into());
     }
-    fs::read_to_string(revision).map_err(|error| format!("Cannot read revision: {error}"))
+    read_markdown_file(&revision)
+        .map(|document| document.content)
+        .map_err(|error| format!("Cannot read revision: {error}"))
 }
 
 fn restore_revision_from(
@@ -1268,21 +1303,244 @@ where
 }
 
 fn is_markdown(path: &Path) -> bool {
-    path.extension()
+    let has_markdown_extension = path
+        .extension()
         .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("md"));
+    let is_macos_metadata = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("._"));
+    has_markdown_extension && !is_macos_metadata
 }
 
 fn invalid_utf8_warning(relative: &Path) -> String {
     format!(
-        "{} is not UTF-8. Convert or restore this file before editing it.",
+        "{} is not a supported text Markdown file. The file was left untouched.",
         relative.display()
     )
 }
 
+fn legacy_encoding_warning(relative: &Path, encoding: MarkdownEncoding) -> Option<String> {
+    encoding.display_name().map(|name| {
+        format!(
+            "{} uses {name}. It is available normally and will become UTF-8 the next time you edit it.",
+            relative.display()
+        )
+    })
+}
+
+fn read_markdown_file(target: &Path) -> io::Result<MarkdownText> {
+    match read_unicode_markdown_file(target) {
+        Ok(document) => Ok(document),
+        Err(unicode_error) => {
+            let bytes = fs::read(target)?;
+            if has_unicode_bom(&bytes) {
+                Err(unicode_error)
+            } else {
+                decode_windows_1252(&bytes)
+                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, unicode_error))
+            }
+        }
+    }
+}
+
+fn read_unicode_markdown_file(target: &Path) -> io::Result<MarkdownText> {
+    const ATTEMPTS: usize = 3;
+    let mut last_error = "the byte stream is not supported Markdown text";
+    for attempt in 0..ATTEMPTS {
+        let bytes = fs::read(target)?;
+        match decode_unicode_markdown_bytes(&bytes) {
+            Ok(document) => return Ok(document),
+            Err(message) => last_error = message,
+        }
+        if attempt + 1 < ATTEMPTS {
+            // Cloud clients and rclone can emit a filesystem event while a
+            // replacement is still being committed. A short bounded retry
+            // prevents a valid multibyte UTF-8 character from looking like a
+            // permanently corrupt sheet halfway through that write.
+            std::thread::sleep(std::time::Duration::from_millis(60));
+        }
+    }
+    Err(io::Error::new(io::ErrorKind::InvalidData, last_error))
+}
+
+fn decode_markdown_bytes(bytes: &[u8]) -> Result<MarkdownText, &'static str> {
+    decode_unicode_markdown_bytes(bytes).or_else(|unicode_error| {
+        if has_unicode_bom(bytes) {
+            Err(unicode_error)
+        } else {
+            decode_windows_1252(bytes)
+        }
+    })
+}
+
+fn has_unicode_bom(bytes: &[u8]) -> bool {
+    bytes.starts_with(&[0xef, 0xbb, 0xbf])
+        || bytes.starts_with(&[0xff, 0xfe])
+        || bytes.starts_with(&[0xfe, 0xff])
+        || bytes.starts_with(&[0x00, 0x00, 0xfe, 0xff])
+}
+
+fn decode_unicode_markdown_bytes(bytes: &[u8]) -> Result<MarkdownText, &'static str> {
+    if let Some(content) = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]) {
+        return std::str::from_utf8(content)
+            .map(|content| MarkdownText {
+                content: content.to_string(),
+                encoding: MarkdownEncoding::Utf8Bom,
+            })
+            .map_err(|_| "invalid UTF-8 after its byte-order mark");
+    }
+    if let Some(content) = bytes.strip_prefix(&[0xff, 0xfe, 0x00, 0x00]) {
+        return decode_utf32(content, true);
+    }
+    if let Some(content) = bytes.strip_prefix(&[0x00, 0x00, 0xfe, 0xff]) {
+        return decode_utf32(content, false);
+    }
+    if let Some(content) = bytes.strip_prefix(&[0xff, 0xfe]) {
+        return decode_utf16(content, true);
+    }
+    if let Some(content) = bytes.strip_prefix(&[0xfe, 0xff]) {
+        return decode_utf16(content, false);
+    }
+    if bytes.iter().any(|byte| is_binary_control(*byte)) {
+        return Err("the byte stream appears to be binary rather than Markdown text");
+    }
+    if let Ok(content) = std::str::from_utf8(bytes) {
+        return Ok(MarkdownText {
+            content: content.to_string(),
+            encoding: MarkdownEncoding::Utf8,
+        });
+    }
+    likely_utf16_endianness(bytes)
+        .map(|little_endian| decode_utf16(bytes, little_endian))
+        .unwrap_or(Err("the byte stream is not valid Unicode Markdown text"))
+}
+
+fn decode_utf16(bytes: &[u8], little_endian: bool) -> Result<MarkdownText, &'static str> {
+    if bytes.len() % 2 != 0 {
+        return Err("UTF-16 Markdown has an incomplete code unit");
+    }
+    let units = bytes
+        .chunks_exact(2)
+        .map(|pair| {
+            if little_endian {
+                u16::from_le_bytes([pair[0], pair[1]])
+            } else {
+                u16::from_be_bytes([pair[0], pair[1]])
+            }
+        })
+        .collect::<Vec<_>>();
+    String::from_utf16(&units)
+        .map(|content| MarkdownText {
+            content,
+            encoding: if little_endian {
+                MarkdownEncoding::Utf16Le
+            } else {
+                MarkdownEncoding::Utf16Be
+            },
+        })
+        .map_err(|_| "UTF-16 Markdown contains an invalid surrogate pair")
+}
+
+fn decode_utf32(bytes: &[u8], little_endian: bool) -> Result<MarkdownText, &'static str> {
+    if bytes.len() % 4 != 0 {
+        return Err("UTF-32 Markdown has an incomplete code unit");
+    }
+    let mut content = String::new();
+    for unit in bytes.chunks_exact(4) {
+        let value = if little_endian {
+            u32::from_le_bytes([unit[0], unit[1], unit[2], unit[3]])
+        } else {
+            u32::from_be_bytes([unit[0], unit[1], unit[2], unit[3]])
+        };
+        content.push(char::from_u32(value).ok_or("UTF-32 Markdown contains an invalid character")?);
+    }
+    Ok(MarkdownText {
+        content,
+        encoding: if little_endian {
+            MarkdownEncoding::Utf32Le
+        } else {
+            MarkdownEncoding::Utf32Be
+        },
+    })
+}
+
+fn likely_utf16_endianness(bytes: &[u8]) -> Option<bool> {
+    if bytes.len() < 4 || bytes.len() % 2 != 0 {
+        return None;
+    }
+    let pairs = bytes.len() / 2;
+    let even_zeroes = bytes.iter().step_by(2).filter(|byte| **byte == 0).count();
+    let odd_zeroes = bytes
+        .iter()
+        .skip(1)
+        .step_by(2)
+        .filter(|byte| **byte == 0)
+        .count();
+    if odd_zeroes * 4 >= pairs * 3 && even_zeroes * 4 <= pairs {
+        Some(true)
+    } else if even_zeroes * 4 >= pairs * 3 && odd_zeroes * 4 <= pairs {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+fn decode_windows_1252(bytes: &[u8]) -> Result<MarkdownText, &'static str> {
+    if bytes.iter().any(|byte| is_binary_control(*byte)) {
+        return Err("the byte stream appears to be binary rather than Markdown text");
+    }
+    let mut content = String::with_capacity(bytes.len());
+    for byte in bytes {
+        let character = match *byte {
+            0x80 => '€',
+            0x82 => '‚',
+            0x83 => 'ƒ',
+            0x84 => '„',
+            0x85 => '…',
+            0x86 => '†',
+            0x87 => '‡',
+            0x88 => 'ˆ',
+            0x89 => '‰',
+            0x8a => 'Š',
+            0x8b => '‹',
+            0x8c => 'Œ',
+            0x8e => 'Ž',
+            0x91 => '‘',
+            0x92 => '’',
+            0x93 => '“',
+            0x94 => '”',
+            0x95 => '•',
+            0x96 => '–',
+            0x97 => '—',
+            0x98 => '˜',
+            0x99 => '™',
+            0x9a => 'š',
+            0x9b => '›',
+            0x9c => 'œ',
+            0x9e => 'ž',
+            0x9f => 'Ÿ',
+            value => char::from_u32(value as u32).expect("a byte is a valid scalar"),
+        };
+        content.push(character);
+    }
+    Ok(MarkdownText {
+        content,
+        encoding: MarkdownEncoding::Windows1252,
+    })
+}
+
+fn is_binary_control(byte: u8) -> bool {
+    matches!(
+        byte,
+        0x00..=0x08 | 0x0b | 0x0e..=0x1f | 0x7f | 0x81 | 0x8d | 0x8f | 0x90 | 0x9d
+    )
+}
+
 fn read_markdown_utf8(target: &Path, relative: &Path) -> Result<String, String> {
-    match fs::read_to_string(target) {
-        Ok(content) => Ok(content),
+    match read_markdown_file(target) {
+        Ok(document) => Ok(document.content),
         Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
             Err(invalid_utf8_warning(relative))
         }
@@ -1526,12 +1784,12 @@ mod tests {
     }
 
     #[test]
-    fn invalid_utf8_sheet_does_not_block_the_project() {
+    fn binary_markdown_artifact_does_not_block_the_project() {
         let root = tempfile::tempdir().expect("temporary library");
         let draft = root.path().join("Draft");
         fs::create_dir(&draft).expect("draft folder");
         fs::write(draft.join("safe.md"), "# Safe\n\nReadable manuscript.").expect("safe sheet");
-        fs::write(draft.join("legacy.md"), [0xff, 0xfe, 0x00, 0x61]).expect("invalid sheet");
+        fs::write(draft.join("binary.md"), [0x00, 0x01, 0x02, 0x03]).expect("binary artifact");
 
         let root_string = root.path().to_string_lossy().into_owned();
         let library = open_library_unindexed(&root_string).expect("scan remaining sheets");
@@ -1539,10 +1797,88 @@ mod tests {
         assert_eq!(library.sheets.len(), 1);
         assert_eq!(library.sheets[0].relative_path, "Draft/safe.md");
         assert_eq!(library.warnings.len(), 1);
-        assert!(library.warnings[0].contains("Draft/legacy.md is not UTF-8"));
-        let error = read_sheet(root_string, "Draft/legacy.md".into())
-            .expect_err("invalid sheet should explain its encoding");
-        assert!(error.contains("Convert or restore this file"));
+        assert!(library.warnings[0].contains("Draft/binary.md is not a supported text"));
+        let error = read_sheet(root_string, "Draft/binary.md".into())
+            .expect_err("binary artifact should stay untouched");
+        assert!(error.contains("file was left untouched"));
+    }
+
+    #[test]
+    fn external_markdown_in_nested_folders_needs_no_app_metadata() {
+        let root = tempfile::tempdir().expect("temporary library");
+        let nested = root.path().join("Novel").join("Part One");
+        fs::create_dir_all(&nested).expect("nested folders");
+        fs::write(
+            nested.join("Opening.MD"),
+            "# A Stranger's Chapter\n\nMade by another Markdown editor — and still ours.",
+        )
+        .expect("external sheet");
+
+        let library = open_library_unindexed(&root.path().to_string_lossy()).expect("scan library");
+
+        assert_eq!(library.sheets.len(), 1);
+        assert_eq!(library.sheets[0].title, "A Stranger's Chapter");
+        assert_eq!(library.sheets[0].relative_path, "Novel/Part One/Opening.MD");
+        assert_eq!(
+            read_sheet(
+                root.path().to_string_lossy().into_owned(),
+                "Novel/Part One/Opening.MD".into(),
+            )
+            .expect("read external sheet"),
+            "# A Stranger's Chapter\n\nMade by another Markdown editor — and still ours."
+        );
+    }
+
+    #[test]
+    fn common_markdown_text_encodings_remain_usable() {
+        let utf16 = "# Maré\n\nA estação — ainda aqui."
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        let mut utf16_with_bom = vec![0xff, 0xfe];
+        utf16_with_bom.extend(utf16);
+        let decoded = decode_markdown_bytes(&utf16_with_bom).expect("UTF-16 Markdown");
+        assert_eq!(decoded.content, "# Maré\n\nA estação — ainda aqui.");
+        assert_eq!(decoded.encoding, MarkdownEncoding::Utf16Le);
+
+        let windows_1252 = b"# Caf\xe9\n\nIt\x92s still a Markdown file.";
+        let decoded = decode_markdown_bytes(windows_1252).expect("Windows-1252 Markdown");
+        assert_eq!(decoded.content, "# Café\n\nIt’s still a Markdown file.");
+        assert_eq!(decoded.encoding, MarkdownEncoding::Windows1252);
+        assert!(std::str::from_utf8(decoded.content.as_bytes()).is_ok());
+        assert!(decode_markdown_bytes(&[0xff, 0xfe, 0x61]).is_err());
+    }
+
+    #[test]
+    fn cloud_replacement_retry_does_not_drop_a_temporarily_incomplete_utf8_file() {
+        let root = tempfile::tempdir().expect("temporary library");
+        let sheet = root.path().join("one.md");
+        fs::write(&sheet, b"# One\n\nThe sea \xe2\x80").expect("incomplete cloud write");
+        let replacement = sheet.clone();
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            fs::write(replacement, "# One\n\nThe sea — quiet.").expect("complete cloud write");
+        });
+
+        let document = read_unicode_markdown_file(&sheet).expect("retried complete sheet");
+        writer.join().expect("replacement writer");
+
+        assert_eq!(document.content, "# One\n\nThe sea — quiet.");
+        assert_eq!(document.encoding, MarkdownEncoding::Utf8);
+    }
+
+    #[test]
+    fn macos_appledouble_markdown_sidecars_are_not_sheets() {
+        let root = tempfile::tempdir().expect("temporary library");
+        fs::write(root.path().join("chapter.md"), "# Chapter\n\nText.").expect("sheet");
+        fs::write(root.path().join("._chapter.md"), [0x00, 0x05, 0x16, 0x07])
+            .expect("AppleDouble sidecar");
+
+        let library = open_library_unindexed(&root.path().to_string_lossy()).expect("scan library");
+
+        assert_eq!(library.sheets.len(), 1);
+        assert_eq!(library.sheets[0].relative_path, "chapter.md");
+        assert!(library.warnings.is_empty());
     }
 
     #[test]

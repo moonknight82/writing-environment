@@ -50,6 +50,8 @@ Version 0.4.1 makes open projects explicit and durable. Switching projects no lo
 
 Version 0.4.2 turns rclone's excessive-deletion abort into a guided recovery state. When more than 25% of tracked files appear missing on either side, sync makes no changes, disables automatic sync for that project, and offers to restore only missing files from the complete side. Recovery uses `--ignore-existing`: it never overwrites an existing file, never bypasses the deletion limit with `--force`, and leaves automatic sync off until the writer deliberately re-enables it.
 
+Version 0.4.3 establishes **files over app** as a compatibility rule. Every readable Markdown file in an opened folder or any nested subfolder is a sheet, whether it was created by Writing Environment, Obsidian, another editor, or a cloud client. UTF-8 (with or without a byte-order mark), UTF-16, UTF-32, and Windows-1252 text are decoded; editing a legacy-encoded file safely normalizes it to UTF-8. macOS AppleDouble `._*.md` metadata is ignored rather than mistaken for prose. Reads retry briefly across cloud-client replacement boundaries, and sync can replace an unreadable local `.md` file with its valid remote counterpart only after preserving the original bytes in app recovery data.
+
 Update artifacts and `latest.json` are published through [GitHub Releases](https://github.com/moonknight82/writing-environment/releases). Every application update is verified with Tauri's embedded public signing key before installation. The private key is held only in the repository's GitHub Actions secrets. macOS uses a signed Tauri application archive; Linux amd64 and Raspberry Pi use signed Debian packages and request system authorization when installation begins.
 
 Application updates do not modify Raspberry Pi OS, desktop settings, rclone configuration, projects, or recovery data. Appliance-level changes remain separate, deliberate updates or full-image releases.
@@ -151,7 +153,7 @@ Release bundles require the updater signing key through `TAURI_SIGNING_PRIVATE_K
 
 ## Publishing a release
 
-The public release workflow builds macOS Apple Silicon, Linux amd64, and Raspberry Pi ARM64 packages. To publish, update the version consistently in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`, commit it, then push the matching tag—for example `v0.4.2`. GitHub Actions tests, builds, signs, and publishes the packages and updater manifest. See [Release process](docs/releases.md) for signing-key recovery and release checks.
+The public release workflow builds macOS Apple Silicon, Linux amd64, and Raspberry Pi ARM64 packages. To publish, update the version consistently in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`, commit it, then push the matching tag—for example `v0.4.3`. GitHub Actions tests, builds, signs, and publishes the packages and updater manifest. See [Release process](docs/releases.md) for signing-key recovery and release checks.
 
 Native system spelling and grammar checking are enabled by default and can be changed in the Writer (`Aa`) panel. Linux builds initialize WebKitGTK with the bundled English (US) and Brazilian Portuguese Hunspell dictionaries; macOS builds enable WebKit's continuous spelling and grammar services. Writing Focus preserves the operating system's native underlines. Automatic correction remains off by default so the operating system cannot silently rewrite manuscript text unless the writer opts in.
 

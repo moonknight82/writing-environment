@@ -275,7 +275,7 @@ It passed the abandoned signal house before descending between black pines to th
   let externalConflictPath: string | null = null;
   let externalDiskContent: string | null = null;
   let resolvingExternalConflict = false;
-  let appVersion = "0.4.2";
+  let appVersion = "0.4.3";
   let automaticUpdateChecks = true;
   let updateVisible = false;
   let updateChecking = false;

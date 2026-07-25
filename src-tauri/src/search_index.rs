@@ -1,6 +1,6 @@
 use super::{
-    invalid_utf8_warning, is_markdown, markdown_body, path_for_frontend, summarize_sheet,
-    LibraryScan, SheetSummary,
+    invalid_utf8_warning, is_markdown, legacy_encoding_warning, markdown_body, path_for_frontend,
+    read_markdown_file, summarize_sheet, LibraryScan, SheetSummary,
 };
 use rusqlite::{params, Connection, Statement, Transaction};
 use std::collections::{HashMap, HashSet};
@@ -40,7 +40,7 @@ pub(super) fn update_sheet(index_path: &Path, root: &Path, target: &Path) -> Res
     let relative = target
         .strip_prefix(root)
         .map_err(|_| "The indexed sheet is outside the selected library.".to_string())?;
-    let content = fs::read_to_string(target)
+    let content = read_markdown_file(target)
         .map_err(|error| format!("Cannot read {} for indexing: {error}", relative.display()))?;
     let metadata = fs::metadata(target).map_err(|error| {
         format!(
@@ -49,14 +49,14 @@ pub(super) fn update_sheet(index_path: &Path, root: &Path, target: &Path) -> Res
         )
     })?;
     let state = file_state(&metadata);
-    let summary = summarize_sheet(target, relative, &content);
+    let summary = summarize_sheet(target, relative, &content.content);
 
     let mut connection = open_connection(index_path)?;
     let transaction = connection
         .transaction()
         .map_err(|error| format!("Cannot begin the index update: {error}"))?;
     let mut writer = IndexWriter::new(&transaction)?;
-    writer.index(&summary, markdown_body(&content), state)?;
+    writer.index(&summary, markdown_body(&content.content), state)?;
     drop(writer);
     transaction
         .commit()
@@ -137,8 +137,8 @@ fn synchronize_once(index_path: &Path, root: &Path) -> Result<LibraryScan, Strin
             continue;
         }
 
-        let content = match fs::read_to_string(entry.path()) {
-            Ok(content) => content,
+        let document = match read_markdown_file(entry.path()) {
+            Ok(document) => document,
             Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
                 warnings.push(invalid_utf8_warning(relative));
                 writer.remove(&relative_path)?;
@@ -146,8 +146,11 @@ fn synchronize_once(index_path: &Path, root: &Path) -> Result<LibraryScan, Strin
             }
             Err(error) => return Err(format!("Cannot read {}: {error}", relative.display())),
         };
-        let summary = summarize_sheet(entry.path(), relative, &content);
-        writer.index(&summary, markdown_body(&content), state)?;
+        if let Some(warning) = legacy_encoding_warning(relative, document.encoding) {
+            warnings.push(warning);
+        }
+        let summary = summarize_sheet(entry.path(), relative, &document.content);
+        writer.index(&summary, markdown_body(&document.content), state)?;
     }
 
     for relative_path in existing.keys().filter(|path| !seen.contains(*path)) {
@@ -468,20 +471,39 @@ mod tests {
     }
 
     #[test]
-    fn index_skips_invalid_utf8_without_blocking_valid_sheets() {
+    fn index_skips_binary_artifacts_without_blocking_valid_sheets() {
         let root = tempfile::tempdir().expect("temporary library");
         let state = tempfile::tempdir().expect("temporary index state");
         let index = state.path().join("library.sqlite3");
         fs::write(root.path().join("safe.md"), "# Safe\n\nSearchable lantern.")
             .expect("valid sheet");
-        fs::write(root.path().join("legacy.md"), [0xff, 0xfe, 0x61]).expect("invalid sheet");
+        fs::write(root.path().join("binary.md"), [0x00, 0x01, 0x02]).expect("binary artifact");
 
         let scan = synchronize(&index, root.path()).expect("build partial index");
 
         assert_eq!(scan.sheets.len(), 1);
         assert_eq!(scan.warnings.len(), 1);
-        assert!(scan.warnings[0].contains("legacy.md is not UTF-8"));
+        assert!(scan.warnings[0].contains("binary.md is not a supported text"));
         assert_eq!(search(&index, "lantern").expect("valid search").len(), 1);
+    }
+
+    #[test]
+    fn index_searches_external_windows_1252_markdown() {
+        let root = tempfile::tempdir().expect("temporary library");
+        let state = tempfile::tempdir().expect("temporary index state");
+        let index = state.path().join("library.sqlite3");
+        fs::write(
+            root.path().join("external.md"),
+            b"# Caf\xe9\n\nA lantern in yesterday\x92s window.",
+        )
+        .expect("Windows-1252 sheet");
+
+        let scan = synchronize(&index, root.path()).expect("index external Markdown");
+
+        assert_eq!(scan.sheets.len(), 1);
+        assert_eq!(scan.sheets[0].title, "Café");
+        assert!(scan.warnings[0].contains("Windows-1252"));
+        assert_eq!(search(&index, "yesterday").expect("legacy search").len(), 1);
     }
 
     #[test]

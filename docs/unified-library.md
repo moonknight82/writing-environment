@@ -4,6 +4,8 @@
 
 Writing Environment will present one calm, application-wide library while preserving ordinary Markdown project folders underneath. The interface owns navigation, Inbox, aggregate Trash, and sync configuration; each project remains an independent folder that can be opened without the application.
 
+Files outrank application state. Any readable `.md` file in a project or nested folder participates without proprietary metadata, no matter which editor created it. Derived indexes can be discarded and rebuilt; unsupported binary artifacts are never rewritten, and common legacy text encodings remain usable until an explicit edit normalizes them to UTF-8.
+
 Sync is universal in the interface but isolated per project in storage and execution. A writer configures one rclone remote root once, then includes or excludes individual projects. Each project keeps its own sync profile, archive, conflict handling, and deletion boundary.
 
 ## Sidebar model

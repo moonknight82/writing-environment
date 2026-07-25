@@ -25,6 +25,7 @@ Current work:
 - [ ] Smoke-test project opening, saved-text search, and index rebuilding on each packaged platform.
 - [ ] Run the cold-index, warm-refresh, search, 100,000-word editing, and memory benchmarks on the physical 2 GB Raspberry Pi.
 - [x] Add coalesced external-file notifications so changes made outside the app can refresh without a manual project reload.
+- [x] Enforce files-over-app interoperability: recursively open metadata-free Markdown from other editors, decode common text encodings, ignore macOS metadata sidecars, and preserve unreadable local bytes before remote repair.
 - [x] Guard autosave with the last known disk version and preserve local edits as a visible conflict copy when both versions change.
 - [x] Expand interrupted-write and synchronization-conflict durability tests, including pre-rename interruption, permission preservation, keep-both conflict copies, isolated sync profiles, access-marker preservation, and complete rclone safety arguments.
 

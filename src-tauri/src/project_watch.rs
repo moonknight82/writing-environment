@@ -1,3 +1,4 @@
+use super::is_markdown;
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -164,11 +165,7 @@ fn event_affects_markdown(event: &Event) -> bool {
 }
 
 fn path_may_affect_markdown(path: &Path) -> bool {
-    if path
-        .extension()
-        .and_then(|value| value.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
-    {
+    if is_markdown(path) {
         return true;
     }
 
@@ -190,6 +187,7 @@ mod tests {
         assert!(path_may_affect_markdown(Path::new("Draft/chapter.md")));
         assert!(path_may_affect_markdown(Path::new("Draft/chapter.MD")));
         assert!(path_may_affect_markdown(Path::new("Draft/.chapter.md")));
+        assert!(!path_may_affect_markdown(Path::new("Draft/._chapter.md")));
         assert!(path_may_affect_markdown(Path::new("Draft")));
         assert!(!path_may_affect_markdown(Path::new("cover.jpg")));
         assert!(!path_may_affect_markdown(Path::new(
