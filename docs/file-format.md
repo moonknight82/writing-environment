@@ -36,6 +36,6 @@ The stable UUID distinguishes a renamed or moved sheet from an unrelated new fil
 
 ## Derived data
 
-Search indexes, word counts, excerpts, recent-item lists, and synchronization state do not belong in Markdown files. They are derived data and may be rebuilt.
+Search indexes, word counts, excerpts, recent-item lists, and synchronization state do not belong in Markdown files. They are derived data and may be rebuilt. A project included in universal sync may contain `.writing-environment-project-id`, a one-line UUID used only to keep its remote folder stable across computers. It is optional project-level metadata: Markdown discovery and editing do not depend on it, and it is never treated as a sheet.
 
-Removed sheets are copied into the application's data directory before the project copy is removed. Each Trash item retains its original relative path and removal time, allowing restoration without placing application metadata inside the synchronized library. Empty Trash permanently removes only validated Trash items belonging to the currently open project; it does not remove project Markdown files or revision History.
+Removed sheets are copied into the application's data directory before the project or Inbox copy is removed. Each Trash item retains its original relative path and removal time without placing application metadata inside manuscript folders. The interface aggregates the separate origin partitions, and Empty Trash permanently removes only validated items from all origins or the explicitly selected origin; it does not remove current Markdown files or revision History.

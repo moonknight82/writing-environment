@@ -35,11 +35,16 @@ Trash
 - Moving a sheet can target a nested folder in any open project. The verified destination copy is made durable before the source is removed.
 - Project folders are shown as a nested tree using their real relative paths. The current one-level group summary will not flatten deeper folders.
 
-Until Inbox is implemented, a desktop session with no active project shows a genuinely empty workspace. It must never fall back to the editable browser-prototype library.
+When no project is restored, the desktop opens the universal Inbox. It never falls back to the editable browser-prototype library.
 
 ## Inbox
 
-Inbox is an application-managed, ordinary Markdown folder in a visible user-writable location. It stores loose sheets that have not yet been assigned to a project and participates in universal search and sync.
+Inbox is an application-managed, ordinary Markdown folder in a visible user-writable location. It stores loose sheets that have not yet been assigned to a project, participates in library search, and can be included in the universal sync root.
+
+The implemented desktop location is `Documents/Writing Environment/Inbox`. Inbox opens as the
+default non-project workspace, uses the same Markdown reader, autosave, History, search index, and
+external-change guard as a project, and never appears in the project registry. It has its own
+isolated sync profile under the universal remote root rather than inheriting a project's settings.
 
 Moving an Inbox sheet into a project uses a safe cross-volume operation: copy to a temporary destination, flush and verify the complete Markdown file, atomically place it at the destination, then remove the Inbox copy. A failure leaves at least one complete copy.
 
@@ -52,6 +57,13 @@ Trash is one aggregate view, not one undifferentiated deletion folder. Items rem
 - Empty Trash can remove all items or only items from a selected origin after explicit confirmation.
 - History and Trash remain local by default and are not part of normal manuscript sync.
 
+The implemented aggregate view reads the existing path-keyed recovery partitions in place; it does
+not migrate, rename, or insert metadata into old trashed manuscripts. Registered closed projects
+remain valid origins. When an origin folder is unavailable, restoration is explicitly redirected to
+Inbox using a new collision-safe filename. Before permanent emptying, every selected recovery
+partition is validated so one malformed origin cannot cause an earlier origin to be partially
+emptied.
+
 ## Universal sync
 
 The user configures a remote root such as `dropbox:Writing Environment` once. The remote layout is deterministic:
@@ -60,20 +72,20 @@ The user configures a remote root such as `dropbox:Writing Environment` once. Th
 Writing Environment/
   Inbox/
   Projects/
-    <stable-project-id>-<safe-project-name>/
+    <stable-project-id>/
 ```
 
-Projects receive a stable identifier so two folders with the same display name cannot collide. The application schedules isolated project sync jobs sequentially and reports one aggregate status: up to date, working, conflicts preserved, or needs attention.
+Projects receive a stable UUID so two folders with the same display name cannot collide and a local rename cannot change the remote destination. The optional `.writing-environment-project-id` marker is created only when a project joins universal sync. It travels with the folder so another installation derives the same remote path, but it is not required to discover, open, or edit any Markdown file. The application schedules isolated project sync jobs sequentially and reports one aggregate status: up to date, working, conflicts preserved, or needs attention.
 
-Each project has a **Sync this project** toggle. Enabling universal sync does not silently upload an existing project: its first remote initialization still requires confirmation and an empty destination. A preference may control whether projects added later are included by default.
+Inbox and each registered project have an inclusion toggle. Enabling a location does not silently upload it: every new remote destination is listed in a separate confirmation, must be empty, and is initialized only after explicit approval. Automatic sync can be enabled only after every included location is initialized, and jobs run sequentially so one failure can be isolated and reported by origin.
 
-Existing project-based rclone profiles will be migrated, not discarded. The migration records their remote locations and preserves their current conflict archives until the new universal root is confirmed.
+Existing project-based rclone profiles are copied into the universal configuration as preserved legacy locations. Their original remote paths, initialization state, isolated rclone work data, and recovery state remain in place; automatic sync is left off. Moving a legacy project into the new layout is a separate explicit action and first-sync confirmation, and the previous remote folder is not deleted or repurposed.
 
 ## Delivery stages
 
 1. [x] Correct empty/restored workspace state and add Close Project.
 2. [x] Add a persistent project registry and nested folder tree.
-3. [ ] Add the universal Inbox and safe Move to Project.
-4. [ ] Aggregate existing origin-partitioned Trash into one view.
-5. [ ] Add universal sync configuration, per-project inclusion, migration, and aggregate status.
+3. [x] Add the universal Inbox and safe Move to Project.
+4. [x] Aggregate existing origin-partitioned Trash into one view.
+5. [x] Add universal sync configuration, per-project inclusion, migration, and aggregate status.
 6. [ ] Run multi-project conflict, recovery, 10,000-sheet, and physical Raspberry Pi 4 tests.

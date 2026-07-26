@@ -11,17 +11,19 @@
     createLibrarySheet,
     desktopAvailable,
     duplicateLibrarySheet,
-    emptyLibraryTrash,
+    emptyUniversalTrash as emptyUniversalTrashItems,
+    ensureProjectIdentity,
     listSheetRevisions,
-    listLibraryTrash,
+    listUniversalTrash,
     moveLibrarySheet,
     moveLibrarySheetToProject,
+    openInbox as openInboxLibrary,
     openLibraryPath,
     preserveLocalConflict,
     readLibrarySheet,
     readSheetRevision,
     renameLibrarySheet,
-    restoreLibraryTrash,
+    restoreUniversalTrash,
     restoreSheetRevision,
     saveLibrarySheet,
     searchLibrary,
@@ -31,7 +33,8 @@
     type LibrarySnapshot,
     type RevisionSummary,
     type SheetSummary,
-    type TrashItem,
+    type TrashOrigin,
+    type UniversalTrashItem,
   } from "./lib/library";
   import {
     getSyncAvailability,
@@ -73,12 +76,36 @@
     sheetPath: string | null;
   }
 
-  interface SyncPreference {
+  interface LegacySyncPreference {
     remote: string;
     remotePath: string;
     automatic: boolean;
     initialized: boolean;
     recoveryTarget: SyncRecoveryTarget | null;
+  }
+
+  interface SyncTargetPreference {
+    included: boolean;
+    initialized: boolean;
+    legacy: boolean;
+    remote: string;
+    remotePath: string;
+    recoveryTarget: SyncRecoveryTarget | null;
+  }
+
+  interface UniversalSyncConfig {
+    remote: string;
+    remoteRoot: string;
+    automatic: boolean;
+    targets: Record<string, SyncTargetPreference>;
+  }
+
+  interface UniversalSyncTarget extends SyncTargetPreference {
+    id: string;
+    name: string;
+    root: string;
+    kind: "inbox" | "project";
+    available: boolean;
   }
 
   interface LibraryFilesChanged {
@@ -203,6 +230,9 @@ It passed the abandoned signal house before descending between black pines to th
   let saveStatus = desktopMode ? "No sheet open" : "Saved locally";
   let libraryName = desktopMode ? "No project open" : "Prototype Library";
   let libraryPath: string | null = null;
+  let inboxPath: string | null = null;
+  let inboxActive = false;
+  let inboxSheetCount = 0;
   let sheets = desktopMode ? [] : prototypeSheets;
   let folders = folderSummaries(sheets);
   let visibleSheets = sheets.filter((sheet) => sheetIsInFolder(sheet, activeGroup));
@@ -221,7 +251,10 @@ It passed the abandoned signal house before descending between black pines to th
   let projectMenuPath: string | null = null;
   let projectMenuX = 0;
   let projectMenuY = 0;
-  let trashItems: TrashItem[] = [];
+  let trashItems: UniversalTrashItem[] = [];
+  let filteredTrashItems: UniversalTrashItem[] = [];
+  let trashActive = false;
+  let trashOriginFilter = "all";
   let searchQuery = "";
   let searchResults: SheetSummary[] = [];
   let searching = false;
@@ -232,6 +265,7 @@ It passed the abandoned signal house before descending between black pines to th
   let dialogTitle = "";
   let dialogGroup = "Draft";
   let dialogProjectPath = "";
+  let dialogFolders: FolderSummary[] = [];
   let dialogError = "";
   let emptyTrashConfirmVisible = false;
   let emptyTrashError = "";
@@ -250,11 +284,13 @@ It passed the abandoned signal house before descending between black pines to th
   let syncPhase: SyncPhase = "local";
   let syncStatus = "Local only";
   let syncMessage = "";
-  let syncRecoveryTarget: SyncRecoveryTarget | null = null;
-  let syncPreference: SyncPreference = emptySyncPreference();
+  let universalSyncConfig: UniversalSyncConfig = emptyUniversalSyncConfig();
+  let universalSyncTargets: UniversalSyncTarget[] = [];
   let syncDraftRemote = "";
   let syncDraftPath = "";
   let syncNeedsInitialization = true;
+  let syncInitializationConfirmVisible = false;
+  let syncInitializationError = "";
   let historyVisible = false;
   let historyLoading = false;
   let historyRestoring = false;
@@ -275,7 +311,7 @@ It passed the abandoned signal house before descending between black pines to th
   let externalConflictPath: string | null = null;
   let externalDiskContent: string | null = null;
   let resolvingExternalConflict = false;
-  let appVersion = "0.4.3";
+  let appVersion = "0.4.4";
   let automaticUpdateChecks = true;
   let updateVisible = false;
   let updateChecking = false;
@@ -289,7 +325,7 @@ It passed the abandoned signal house before descending between black pines to th
   $: visibleSheets = sortSheets(
     searchQuery.trim()
       ? searchResults
-      : activeGroup === "All Sheets"
+      : activeGroup === "All Sheets" || inboxActive
         ? sheets
         : sheets.filter((sheet) => sheetIsInFolder(sheet, activeGroup)),
     sheetSort,
@@ -297,14 +333,20 @@ It passed the abandoned signal house before descending between black pines to th
   $: sortedProjects = [...projects].sort(
     (left, right) => Number(right.pinned) - Number(left.pinned) || right.lastOpened - left.lastOpened,
   );
-  $: activeProjectPath = libraryPath ?? (!desktopMode ? prototypeProjectPath : null);
+  $: activeProjectPath = inboxActive || trashActive
+    ? null
+    : libraryPath ?? (!desktopMode ? prototypeProjectPath : null);
   $: sidebarProjects = sortedProjects.filter(
     (project) => project.open || project.pinned || project.path === activeProjectPath,
   );
+  $: filteredTrashItems = trashOriginFilter === "all"
+    ? trashItems
+    : trashItems.filter((item) => item.originId === trashOriginFilter);
   $: focusSegments = buildFocusSegments(content, cursorPosition, writingFocusMode);
-  $: syncNeedsInitialization = !syncPreference.initialized
-    || syncDraftRemote !== syncPreference.remote
-    || syncDraftPath.trim() !== syncPreference.remotePath;
+  $: universalSyncTargets = buildUniversalSyncTargets();
+  $: syncNeedsInitialization = universalSyncTargets.some(
+    (target) => target.included && !target.initialized,
+  );
   $: selectedRevision = historyRevisions.find((revision) => revision.id === selectedRevisionId);
 
   afterUpdate(() => {
@@ -338,6 +380,11 @@ It passed the abandoned signal house before descending between black pines to th
     if (desktopMode) {
       projects = loadStoredProjects();
       saveProjects();
+      universalSyncConfig = loadUniversalSyncConfig();
+      migrateLegacySyncPreferences();
+      syncDraftRemote = universalSyncConfig.remote;
+      syncDraftPath = universalSyncConfig.remoteRoot;
+      updateUniversalSyncSummary();
     }
     reopenLastWorkspace = storedReopenPreference !== "false";
     if (!reopenLastWorkspace) localStorage.removeItem("writing-environment.last-workspace");
@@ -362,8 +409,8 @@ It passed the abandoned signal house before descending between black pines to th
     }
     registerSessionSheet();
 
-    if (reopenLastWorkspace && desktopAvailable()) void reopenStoredWorkspace();
     if (desktopAvailable()) {
+      void initializeDesktopWorkspace();
       void getVersion().then((version) => (appVersion = version));
       void initializeLibraryChangeListener();
       void refreshSyncAvailability();
@@ -536,7 +583,8 @@ It passed the abandoned signal house before descending between black pines to th
       libraryName = snapshot.name;
       sheets = snapshot.sheets;
       folders = folderSummaries(snapshot.sheets);
-      await refreshTrash();
+      if (inboxActive) inboxSheetCount = snapshot.sheets.length;
+      await refreshUniversalTrash();
       if (searchQuery.trim()) handleSearchInput(searchQuery);
 
       const activeSummary = sheetPath
@@ -559,7 +607,9 @@ It passed the abandoned signal house before descending between black pines to th
       }
 
       activeSheet = activeSummary.title;
-      if (!searchQuery.trim()) activeGroup = sheetFolder(activeSummary);
+      if (!searchQuery.trim() && !trashActive) {
+        activeGroup = inboxActive ? "Inbox" : sheetFolder(activeSummary);
+      }
       const diskContent = await readLibrarySheet(projectPath, sheetPath);
       if (libraryPath !== projectPath || activeSheetPath !== sheetPath) return;
 
@@ -676,7 +726,7 @@ It passed the abandoned signal house before descending between black pines to th
   }
 
   function clearEditorForEmptyLibrary(): void {
-    activeGroup = "All Sheets";
+    if (!trashActive) activeGroup = inboxActive ? "Inbox" : "All Sheets";
     activeSheet = "No Markdown sheets";
     activeSheetPath = null;
     content = "";
@@ -929,7 +979,9 @@ It passed the abandoned signal house before descending between black pines to th
     clearExternalConflict();
     activeSheet = sheet.title;
     activeSheetPath = sheet.relativePath;
-    if (!searchQuery.trim()) activeGroup = sheetFolder(sheet);
+    if (!searchQuery.trim() && !trashActive) {
+      activeGroup = inboxActive ? "Inbox" : sheetFolder(sheet);
+    }
 
     if (!libraryPath) {
       content = readPrototypeSheet(sheet.relativePath);
@@ -951,8 +1003,12 @@ It passed the abandoned signal house before descending between black pines to th
       dirty = false;
       saveStatus = "Saved locally";
       errorMessage = "";
-      rememberActiveProjectSheet(sheet.relativePath);
-      rememberLastWorkspace();
+      if (inboxActive) {
+        localStorage.setItem("writing-environment.last-inbox-sheet", sheet.relativePath);
+      } else {
+        rememberActiveProjectSheet(sheet.relativePath);
+        rememberLastWorkspace();
+      }
     } catch (error) {
       saveStatus = "Open failed";
       errorMessage = error instanceof Error ? error.message : String(error);
@@ -980,6 +1036,27 @@ It passed the abandoned signal house before descending between black pines to th
     }
   }
 
+  async function openInbox(): Promise<void> {
+    if (!desktopAvailable()) return;
+    if (syncRunning) {
+      errorMessage = "Wait for the current project sync to finish before opening Inbox.";
+      return;
+    }
+    if (dirty && !(await persistCurrentSheet())) return;
+    loadingLibrary = true;
+    errorMessage = "";
+    try {
+      await activateInbox(
+        await openInboxLibrary(),
+        localStorage.getItem("writing-environment.last-inbox-sheet"),
+      );
+    } catch (error) {
+      errorMessage = `Cannot open Inbox: ${errorText(error)}`;
+    } finally {
+      loadingLibrary = false;
+    }
+  }
+
   async function openProject(project: ProjectBookmark): Promise<void> {
     projectMenuPath = null;
     if (!desktopMode && project.path === prototypeProjectPath) return;
@@ -988,7 +1065,14 @@ It passed the abandoned signal house before descending between black pines to th
       return;
     }
 
-    if (project.path === libraryPath) return;
+    if (project.path === libraryPath) {
+      trashActive = false;
+      const current = activeSheetPath
+        ? sheets.find((sheet) => sheet.relativePath === activeSheetPath)
+        : undefined;
+      activeGroup = current ? sheetFolder(current) : "All Sheets";
+      return;
+    }
     if (dirty && !(await persistCurrentSheet())) return;
     loadingLibrary = true;
     errorMessage = "";
@@ -1010,10 +1094,27 @@ It passed the abandoned signal house before descending between black pines to th
   }
 
   function selectFolder(folder: string): void {
+    trashActive = false;
     activeGroup = folder;
     searchQuery = "";
     searchResults = [];
     sortMenuVisible = false;
+  }
+
+  async function selectUniversalTrash(): Promise<void> {
+    if (dirty && !(await persistCurrentSheet())) return;
+    trashActive = true;
+    activeGroup = "Trash";
+    searchQuery = "";
+    searchResults = [];
+    sheetActionsPath = null;
+    sortMenuVisible = false;
+    try {
+      await refreshUniversalTrash();
+      errorMessage = "";
+    } catch (error) {
+      errorMessage = `Cannot open Trash: ${errorText(error)}`;
+    }
   }
 
   async function closeProject(project: ProjectBookmark): Promise<void> {
@@ -1045,7 +1146,15 @@ It passed the abandoned signal house before descending between black pines to th
 
     localStorage.removeItem("writing-environment.last-workspace");
     if (!nextProject) {
-      clearWorkspace();
+      try {
+        await activateInbox(
+          await openInboxLibrary(),
+          localStorage.getItem("writing-environment.last-inbox-sheet"),
+        );
+      } catch (error) {
+        clearWorkspace();
+        errorMessage = `Closed ${project.name}, but could not open Inbox: ${errorText(error)}`;
+      }
       return;
     }
 
@@ -1064,6 +1173,8 @@ It passed the abandoned signal house before descending between black pines to th
   }
 
   function clearWorkspace(): void {
+    inboxActive = false;
+    trashActive = false;
     libraryPath = null;
     libraryName = "No project open";
     activeGroup = "All Sheets";
@@ -1079,12 +1190,7 @@ It passed the abandoned signal house before descending between black pines to th
     cursorPosition = 0;
     dirty = false;
     saveStatus = "No sheet open";
-    syncPreference = emptySyncPreference();
-    syncDraftRemote = "";
-    syncDraftPath = "";
-    syncPhase = "local";
-    syncStatus = "No project open";
-    syncMessage = "";
+    updateUniversalSyncSummary();
     clearExternalConflict();
   }
 
@@ -1098,9 +1204,10 @@ It passed the abandoned signal house before descending between black pines to th
       ? await readLibrarySheet(selected.path, firstSheet.relativePath)
       : "";
 
+    inboxActive = false;
+    trashActive = false;
     libraryName = selected.name;
     libraryPath = selected.path;
-    loadProjectSyncPreference(selected.path, selected.name);
     sheets = selected.sheets;
     folders = folderSummaries(selected.sheets);
     rememberProject(selected, firstSheet?.relativePath ?? null);
@@ -1124,9 +1231,61 @@ It passed the abandoned signal house before descending between black pines to th
     dirty = false;
     clearExternalConflict();
     saveStatus = "Saved locally";
-    await refreshTrash();
+    await refreshUniversalTrash();
     rememberLastWorkspace();
     errorMessage = libraryWarningMessage(selected);
+    await watchActiveLibrary(selected.path);
+    scheduleAutomaticSync(3000);
+  }
+
+  async function activateInbox(
+    selected: LibrarySnapshot,
+    preferredSheetPath: string | null = null,
+  ): Promise<void> {
+    const firstSheet = selected.sheets.find((sheet) => sheet.relativePath === preferredSheetPath)
+      ?? selected.sheets[0];
+    const firstContent = firstSheet
+      ? await readLibrarySheet(selected.path, firstSheet.relativePath)
+      : "";
+
+    if (syncTimer) clearTimeout(syncTimer);
+    syncTimer = undefined;
+    syncMenuVisible = false;
+    inboxActive = true;
+    trashActive = false;
+    inboxPath = selected.path;
+    inboxSheetCount = selected.sheets.length;
+    libraryName = "Inbox";
+    libraryPath = selected.path;
+    sheets = selected.sheets;
+    folders = [];
+    trashItems = [];
+    searchQuery = "";
+    searchResults = [];
+    updateUniversalSyncSummary();
+
+    if (firstSheet) {
+      activeGroup = "Inbox";
+      activeSheet = firstSheet.title;
+      activeSheetPath = firstSheet.relativePath;
+      content = firstContent;
+      persistedContent = content;
+      localStorage.setItem("writing-environment.last-inbox-sheet", firstSheet.relativePath);
+    } else {
+      activeGroup = "Inbox";
+      activeSheet = "No Inbox sheets";
+      activeSheetPath = null;
+      content = "";
+      persistedContent = "";
+    }
+
+    cursorPosition = 0;
+    registerSessionSheet();
+    dirty = false;
+    clearExternalConflict();
+    saveStatus = "Saved locally";
+    errorMessage = libraryWarningMessage(selected);
+    await refreshUniversalTrash();
     await watchActiveLibrary(selected.path);
     scheduleAutomaticSync(3000);
   }
@@ -1140,10 +1299,10 @@ It passed the abandoned signal house before descending between black pines to th
     refreshingSync = true;
     try {
       syncAvailability = await getSyncAvailability();
-      if (!syncRecoveryTarget) syncMessage = syncAvailability.message;
       if (!syncDraftRemote && syncAvailability.remotes.length > 0) {
         syncDraftRemote = syncAvailability.remotes[0];
       }
+      if (!universalSyncConfig.remote && !syncRunning) syncMessage = syncAvailability.message;
     } catch (error) {
       syncMessage = error instanceof Error ? error.message : String(error);
     } finally {
@@ -1160,103 +1319,264 @@ It passed the abandoned signal house before descending between black pines to th
     if (syncMenuVisible) void refreshSyncAvailability();
   }
 
-  async function runProjectSync(automatic = false): Promise<void> {
-    if (!libraryPath || !desktopAvailable() || syncRunning) return;
-    const remote = automatic ? syncPreference.remote : syncDraftRemote;
-    const remotePath = automatic ? syncPreference.remotePath : syncDraftPath.trim();
-    if (!remote || !remotePath) {
-      syncMessage = "Choose a remote and remote folder first.";
+  function saveUniversalSyncRoot(): void {
+    const remote = syncDraftRemote.trim();
+    const remoteRoot = normalizeRemoteRoot(syncDraftPath);
+    if (!remote || !remoteRoot) {
+      syncPhase = "error";
+      syncStatus = "Setup incomplete";
+      syncMessage = "Choose an rclone remote and a universal remote root.";
+      return;
+    }
+    if (syncAvailability && !syncAvailability.remotes.includes(remote)) {
+      syncPhase = "error";
+      syncStatus = "Remote unavailable";
+      syncMessage = `The rclone remote ‘${remote}’ is not configured on this computer.`;
+      return;
+    }
+
+    const identityChanged = remote !== universalSyncConfig.remote
+      || remoteRoot !== universalSyncConfig.remoteRoot;
+    const targets = { ...universalSyncConfig.targets };
+    if (identityChanged) {
+      for (const [id, preference] of Object.entries(targets)) {
+        if (preference.legacy) continue;
+        targets[id] = {
+          ...preference,
+          initialized: false,
+          recoveryTarget: null,
+        };
+      }
+    }
+    universalSyncConfig = {
+      remote,
+      remoteRoot,
+      automatic: identityChanged ? false : universalSyncConfig.automatic,
+      targets,
+    };
+    syncDraftPath = remoteRoot;
+    saveUniversalSyncConfig();
+    updateUniversalSyncSummary();
+    syncMessage = identityChanged
+      ? "Universal root saved. No files were uploaded; review included locations, then start sync explicitly."
+      : "Universal sync settings saved.";
+  }
+
+  async function setUniversalTargetIncluded(
+    target: UniversalSyncTarget,
+    included: boolean,
+  ): Promise<void> {
+    let resolvedTarget = target;
+    if (included && target.kind === "project" && !target.legacy) {
+      try {
+        resolvedTarget = await ensureUniversalProjectIdentity(target);
+      } catch (error) {
+        syncPhase = "error";
+        syncStatus = "Project identity unavailable";
+        syncMessage = errorText(error);
+        return;
+      }
+    }
+
+    updateSyncTargetPreference(resolvedTarget.id, {
+      included,
+      initialized: resolvedTarget.initialized,
+      legacy: resolvedTarget.legacy,
+      remote: resolvedTarget.legacy ? resolvedTarget.remote : "",
+      remotePath: resolvedTarget.legacy ? resolvedTarget.remotePath : "",
+      recoveryTarget: resolvedTarget.recoveryTarget,
+    });
+    if (!included && universalSyncConfig.automatic) {
+      universalSyncConfig = { ...universalSyncConfig, automatic: false };
+      saveUniversalSyncConfig();
+    }
+    updateUniversalSyncSummary();
+  }
+
+  async function useUniversalLocation(target: UniversalSyncTarget): Promise<void> {
+    if (!universalSyncConfigured()) {
+      syncPhase = "error";
+      syncStatus = "Setup incomplete";
+      syncMessage = "Save the universal remote root before moving a preserved legacy profile.";
+      return;
+    }
+    let resolvedTarget: UniversalSyncTarget;
+    try {
+      resolvedTarget = await ensureUniversalProjectIdentity(target);
+    } catch (error) {
+      syncPhase = "error";
+      syncStatus = "Project identity unavailable";
+      syncMessage = errorText(error);
+      return;
+    }
+    updateSyncTargetPreference(resolvedTarget.id, {
+      included: resolvedTarget.included,
+      initialized: false,
+      legacy: false,
+      remote: "",
+      remotePath: "",
+      recoveryTarget: null,
+    });
+    universalSyncConfig = { ...universalSyncConfig, automatic: false };
+    saveUniversalSyncConfig();
+    updateUniversalSyncSummary();
+    syncMessage = `${resolvedTarget.name} will use its new universal location after explicit first-sync confirmation. Its previous remote folder was left untouched.`;
+  }
+
+  async function runUniversalSync(
+    automatic = false,
+    initializationConfirmed = false,
+  ): Promise<void> {
+    if (!desktopAvailable() || syncRunning) return;
+    let included = buildUniversalSyncTargets().filter((target) => target.included);
+    if (included.length === 0) {
+      syncPhase = "error";
+      syncStatus = "Nothing included";
+      syncMessage = "Include Inbox or at least one project before syncing.";
+      return;
+    }
+    try {
+      for (const target of included) {
+        if (target.kind === "project" && !target.legacy) {
+          await ensureUniversalProjectIdentity(target);
+        }
+      }
+      included = buildUniversalSyncTargets().filter((target) => target.included);
+    } catch (error) {
+      syncPhase = "error";
+      syncStatus = "Project identity unavailable";
+      syncMessage = errorText(error);
+      return;
+    }
+    const missingConfiguration = included.filter((target) => !target.remote || !target.remotePath);
+    if (missingConfiguration.length > 0) {
+      syncPhase = "error";
+      syncStatus = "Setup incomplete";
+      syncMessage = `Save a universal root for ${missingConfiguration.map((target) => target.name).join(", ")}.`;
+      return;
+    }
+    let targets = included;
+    if (automatic) targets = targets.filter((target) => target.initialized);
+    if (targets.length === 0) {
+      updateUniversalSyncSummary();
+      return;
+    }
+
+    const initializing = targets.filter((target) => !target.initialized);
+    if (!automatic && initializing.length > 0 && !initializationConfirmed) {
+      syncInitializationError = "";
+      syncInitializationConfirmVisible = true;
       return;
     }
 
     syncRunning = true;
     syncPhase = "syncing";
-    syncStatus = "Syncing…";
+    syncStatus = `Syncing 0 / ${targets.length}`;
     syncMessage = "Saving locally before sync…";
     if (syncTimer) clearTimeout(syncTimer);
+    syncInitializationConfirmVisible = false;
 
     try {
       if (dirty) await persistCurrentSheet();
       if (dirty) throw new Error("The current sheet could not be saved, so sync did not start.");
+      const failures: string[] = [];
+      let completed = 0;
+      let conflicts = 0;
+      let activeRootChanged = false;
 
-      const identityChanged = remote !== syncPreference.remote || remotePath !== syncPreference.remotePath;
-      syncPreference = {
-        remote,
-        remotePath,
-        automatic: identityChanged ? false : syncPreference.automatic,
-        initialized: identityChanged ? false : syncPreference.initialized,
-        recoveryTarget: identityChanged ? null : syncPreference.recoveryTarget,
-      };
-      saveProjectSyncPreference();
-      syncMessage = syncPreference.initialized ? "Comparing both copies…" : "Initializing the remote folder…";
-
-      const result = await syncProject(libraryPath, remote, remotePath);
-      syncRecoveryTarget = null;
-      syncPreference = { ...syncPreference, initialized: result.initialized, recoveryTarget: null };
-      syncDraftRemote = remote;
-      syncDraftPath = remotePath;
-      saveProjectSyncPreference();
-      syncPhase = result.status;
-      syncStatus = result.status === "conflict" ? "Conflicts preserved" : "Synced";
-      syncMessage = result.message;
-      await reloadLibrary(activeSheetPath, true);
-      errorMessage = "";
-    } catch (error) {
-      const deletionGuard = syncDeletionGuard(errorText(error));
-      syncPhase = "error";
-      syncRecoveryTarget = deletionGuard;
-      if (deletionGuard) {
-        syncPreference = { ...syncPreference, automatic: false, recoveryTarget: deletionGuard };
-        saveProjectSyncPreference();
-        syncStatus = "Sync safely paused";
-        syncMessage = deletionGuard === "local"
-          ? "No files were changed. More than 25% of the tracked files are missing from this project folder, so automatic sync was turned off."
-          : "No files were changed. More than 25% of the tracked files are missing from the remote folder, so automatic sync was turned off.";
-      } else {
-        syncStatus = "Sync needs attention";
-        syncMessage = errorText(error);
+      for (const target of targets) {
+        syncStatus = `Syncing ${completed + 1} / ${targets.length}`;
+        syncMessage = target.initialized
+          ? `Comparing ${target.name}…`
+          : `Initializing ${target.name} in an empty remote folder…`;
+        try {
+          const result = await syncProject(target.root, target.remote, target.remotePath);
+          conflicts += result.conflicts;
+          updateSyncTargetPreference(target.id, {
+            included: true,
+            initialized: result.initialized,
+            legacy: target.legacy,
+            remote: target.legacy ? target.remote : "",
+            remotePath: target.legacy ? target.remotePath : "",
+            recoveryTarget: null,
+          });
+          if (libraryPath === target.root) activeRootChanged = true;
+        } catch (error) {
+          const message = errorText(error);
+          const deletionGuard = syncDeletionGuard(message);
+          updateSyncTargetPreference(target.id, {
+            included: true,
+            initialized: target.initialized,
+            legacy: target.legacy,
+            remote: target.legacy ? target.remote : "",
+            remotePath: target.legacy ? target.remotePath : "",
+            recoveryTarget: deletionGuard,
+          });
+          failures.push(`${target.name}: ${syncFailureMessage(message, deletionGuard)}`);
+        }
+        completed += 1;
+        saveUniversalSyncConfig();
       }
+
+      if (failures.length > 0) {
+        universalSyncConfig = { ...universalSyncConfig, automatic: false };
+        saveUniversalSyncConfig();
+        syncPhase = "error";
+        syncStatus = `${completed - failures.length} / ${completed} synced`;
+        syncMessage = failures.slice(0, 3).join(" · ");
+        if (failures.length > 3) syncMessage += ` · and ${failures.length - 3} more`;
+        if (automatic) errorMessage = syncMessage;
+      } else {
+        syncPhase = conflicts > 0 ? "conflict" : "synced";
+        syncStatus = conflicts > 0 ? "Conflicts preserved" : "Everything synced";
+        syncMessage = `${completed} ${completed === 1 ? "location is" : "locations are"} up to date${conflicts > 0 ? ` with ${conflicts} preserved conflict ${conflicts === 1 ? "file" : "files"}` : ""}.`;
+        errorMessage = "";
+      }
+      if (activeRootChanged && libraryPath) await reloadLibrary(activeSheetPath, true);
+    } catch (error) {
+      syncPhase = "error";
+      universalSyncConfig = { ...universalSyncConfig, automatic: false };
+      saveUniversalSyncConfig();
+      syncStatus = "Sync needs attention";
+      syncMessage = errorText(error);
       if (automatic) errorMessage = syncMessage;
     } finally {
       syncRunning = false;
     }
   }
 
-  async function recoverPausedSync(): Promise<void> {
-    if (!libraryPath || !syncRecoveryTarget || syncRunning) return;
-    const projectPath = libraryPath;
-    const remote = syncPreference.remote;
-    const remotePath = syncPreference.remotePath;
-    if (!remote || !remotePath) return;
+  async function recoverPausedSync(target: UniversalSyncTarget): Promise<void> {
+    if (!target.recoveryTarget || syncRunning) return;
 
     syncRunning = true;
     syncPhase = "syncing";
     syncStatus = "Recovering safely…";
-    syncMessage = syncRecoveryTarget === "local"
-      ? "Restoring remote-only files to this project without overwriting local files…"
-      : "Restoring local-only files to the remote without overwriting remote files…";
+    syncMessage = target.recoveryTarget === "local"
+      ? `Restoring remote-only files to ${target.name} without overwriting local files…`
+      : `Restoring local-only files from ${target.name} without overwriting remote files…`;
     try {
       if (dirty) await persistCurrentSheet();
       if (dirty) throw new Error("The current sheet could not be saved, so recovery did not start.");
       const result = await recoverProjectSync(
-        projectPath,
-        remote,
-        remotePath,
-        syncRecoveryTarget,
+        target.root,
+        target.remote,
+        target.remotePath,
+        target.recoveryTarget,
       );
-      if (libraryPath !== projectPath) return;
-      syncRecoveryTarget = null;
-      syncPreference = {
-        ...syncPreference,
+      updateSyncTargetPreference(target.id, {
+        included: target.included,
         initialized: result.initialized,
-        automatic: false,
+        legacy: target.legacy,
+        remote: target.legacy ? target.remote : "",
+        remotePath: target.legacy ? target.remotePath : "",
         recoveryTarget: null,
-      };
-      saveProjectSyncPreference();
+      });
+      universalSyncConfig = { ...universalSyncConfig, automatic: false };
+      saveUniversalSyncConfig();
       syncPhase = result.status;
       syncStatus = result.status === "conflict" ? "Conflicts preserved" : "Recovered and synced";
       syncMessage = result.message;
-      await reloadLibrary(activeSheetPath, true);
+      if (libraryPath === target.root) await reloadLibrary(activeSheetPath, true);
       errorMessage = "";
     } catch (error) {
       syncPhase = "error";
@@ -1269,9 +1589,21 @@ It passed the abandoned signal house before descending between black pines to th
   }
 
   function setAutomaticSync(enabled: boolean): void {
-    if (!syncPreference.initialized || syncRecoveryTarget) return;
-    syncPreference = { ...syncPreference, automatic: enabled };
-    saveProjectSyncPreference();
+    const included = buildUniversalSyncTargets().filter((target) => target.included);
+    if (
+      enabled
+      && (
+        included.length === 0
+        || included.some((target) => !target.initialized || !!target.recoveryTarget)
+      )
+    ) {
+      syncPhase = "error";
+      syncStatus = "Setup incomplete";
+      syncMessage = "Initialize every included location and resolve paused recovery before enabling automatic sync.";
+      return;
+    }
+    universalSyncConfig = { ...universalSyncConfig, automatic: enabled };
+    saveUniversalSyncConfig();
     syncStatus = enabled ? "Automatic sync on" : "Ready to sync";
     syncPhase = "ready";
     if (enabled) scheduleAutomaticSync(1000);
@@ -1281,54 +1613,92 @@ It passed the abandoned signal house before descending between black pines to th
   function scheduleAutomaticSync(delay = 10_000): void {
     if (syncTimer) clearTimeout(syncTimer);
     if (
-      !libraryPath
-      || !syncPreference.automatic
-      || !syncPreference.initialized
+      !universalSyncConfig.automatic
       || syncRunning
       || !desktopAvailable()
     ) return;
-    const scheduledProject = libraryPath;
     syncTimer = setTimeout(() => {
-      if (libraryPath === scheduledProject && !dirty) void runProjectSync(true);
+      if (!dirty) void runUniversalSync(true);
     }, delay);
   }
 
-  function loadProjectSyncPreference(projectPath: string, projectName: string): void {
-    if (syncTimer) clearTimeout(syncTimer);
-    const preferences = loadSyncPreferences();
-    syncPreference = preferences[projectPath] ?? {
-      ...emptySyncPreference(),
-      remotePath: `Writing Environment/${safeRemoteFolderName(projectName)}`,
-    };
-    syncDraftRemote = syncPreference.remote;
-    syncDraftPath = syncPreference.remotePath;
-    syncPhase = syncPreference.initialized ? "ready" : "local";
-    syncStatus = syncPreference.initialized
-      ? syncPreference.automatic ? "Automatic sync on" : "Ready to sync"
-      : "Local only";
-    syncMessage = "";
-    syncRecoveryTarget = syncPreference.recoveryTarget ?? null;
-    if (syncRecoveryTarget) {
-      syncPhase = "error";
-      syncStatus = "Sync safely paused";
-      syncMessage = "Deletion protection previously paused this project. Restore the missing files or leave sync off.";
+  function buildUniversalSyncTargets(): UniversalSyncTarget[] {
+    const targets: UniversalSyncTarget[] = [];
+    if (inboxPath) targets.push(buildUniversalSyncTarget("inbox", "Inbox", inboxPath, "inbox"));
+    for (const project of projects) {
+      targets.push(buildUniversalSyncTarget(project.id, project.name, project.path, "project"));
     }
+    return targets;
   }
 
-  function saveProjectSyncPreference(): void {
-    if (!libraryPath) return;
-    const preferences = loadSyncPreferences();
-    preferences[libraryPath] = syncPreference;
-    localStorage.setItem("writing-environment.sync-preferences", JSON.stringify(preferences));
+  function buildUniversalSyncTarget(
+    id: string,
+    name: string,
+    root: string,
+    kind: "inbox" | "project",
+  ): UniversalSyncTarget {
+    const preference = universalSyncConfig.targets[id] ?? defaultSyncTargetPreference(kind);
+    const remote = preference.legacy ? preference.remote : universalSyncConfig.remote;
+    const remotePath = preference.legacy
+      ? preference.remotePath
+      : universalRemotePath(id, kind);
+    return {
+      ...preference,
+      id,
+      name,
+      root,
+      kind,
+      available: Boolean(root),
+      remote,
+      remotePath,
+    };
   }
 
-  function loadSyncPreferences(): Record<string, SyncPreference> {
+  function updateSyncTargetPreference(id: string, preference: SyncTargetPreference): void {
+    universalSyncConfig = {
+      ...universalSyncConfig,
+      targets: { ...universalSyncConfig.targets, [id]: preference },
+    };
+    saveUniversalSyncConfig();
+  }
+
+  async function ensureUniversalProjectIdentity(
+    target: UniversalSyncTarget,
+  ): Promise<UniversalSyncTarget> {
+    if (target.kind !== "project") return target;
+    const identity = await ensureProjectIdentity(target.root, target.id);
+    if (identity === target.id) return target;
+
+    migrateSyncTargetIdentity(target.id, identity);
+    projects = projects.map((project) =>
+      project.path === target.root ? { ...project, id: identity } : project,
+    );
+    saveProjects();
+    return buildUniversalSyncTarget(identity, target.name, target.root, "project");
+  }
+
+  function migrateSyncTargetIdentity(previousId: string, identity: string): void {
+    if (previousId === identity || universalSyncConfig.targets[identity]) return;
+    const previous = universalSyncConfig.targets[previousId];
+    if (!previous) return;
+    const migrated = previous.legacy
+      ? { ...previous }
+      : { ...previous, initialized: false, recoveryTarget: null };
+    universalSyncConfig = {
+      ...universalSyncConfig,
+      automatic: previous.legacy ? universalSyncConfig.automatic : false,
+      targets: { ...universalSyncConfig.targets, [identity]: migrated },
+    };
+    saveUniversalSyncConfig();
+  }
+
+  function loadLegacySyncPreferences(): Record<string, LegacySyncPreference> {
     try {
       const parsed: unknown = JSON.parse(
         localStorage.getItem("writing-environment.sync-preferences") ?? "{}",
       );
       if (typeof parsed === "object" && parsed !== null) {
-        return parsed as Record<string, SyncPreference>;
+        return parsed as Record<string, LegacySyncPreference>;
       }
     } catch {
       // Ignore malformed local preferences.
@@ -1336,24 +1706,146 @@ It passed the abandoned signal house before descending between black pines to th
     return {};
   }
 
-  function emptySyncPreference(): SyncPreference {
+  function loadUniversalSyncConfig(): UniversalSyncConfig {
+    try {
+      const parsed: unknown = JSON.parse(
+        localStorage.getItem("writing-environment.universal-sync") ?? "null",
+      );
+      if (typeof parsed === "object" && parsed !== null) {
+        const value = parsed as Partial<UniversalSyncConfig>;
+        return {
+          remote: typeof value.remote === "string" ? value.remote : "",
+          remoteRoot: typeof value.remoteRoot === "string" ? value.remoteRoot : "",
+          automatic: value.automatic === true,
+          targets: typeof value.targets === "object" && value.targets !== null
+            ? value.targets as Record<string, SyncTargetPreference>
+            : {},
+        };
+      }
+    } catch {
+      // Ignore malformed local preferences.
+    }
+    return emptyUniversalSyncConfig();
+  }
+
+  function saveUniversalSyncConfig(): void {
+    localStorage.setItem(
+      "writing-environment.universal-sync",
+      JSON.stringify(universalSyncConfig),
+    );
+  }
+
+  function migrateLegacySyncPreferences(): void {
+    const legacy = loadLegacySyncPreferences();
+    const targets = { ...universalSyncConfig.targets };
+    let migrated = 0;
+    for (const project of projects) {
+      if (targets[project.id]) continue;
+      const previous = legacy[project.path];
+      if (!previous?.remote || !previous.remotePath) continue;
+      targets[project.id] = {
+        included: previous.initialized,
+        initialized: previous.initialized,
+        legacy: true,
+        remote: previous.remote,
+        remotePath: previous.remotePath,
+        recoveryTarget: previous.recoveryTarget ?? null,
+      };
+      migrated += 1;
+    }
+    if (migrated === 0) return;
+    universalSyncConfig = { ...universalSyncConfig, automatic: false, targets };
+    saveUniversalSyncConfig();
+    syncMessage = `${migrated} existing project sync ${migrated === 1 ? "setting was" : "settings were"} preserved and automatic sync was left off.`;
+  }
+
+  function emptyUniversalSyncConfig(): UniversalSyncConfig {
     return {
       remote: "",
-      remotePath: "",
+      remoteRoot: "",
       automatic: false,
+      targets: {},
+    };
+  }
+
+  function defaultSyncTargetPreference(kind: "inbox" | "project"): SyncTargetPreference {
+    return {
+      included: kind === "inbox" && universalSyncConfigured(),
       initialized: false,
+      legacy: false,
+      remote: "",
+      remotePath: "",
       recoveryTarget: null,
     };
+  }
+
+  function universalSyncConfigured(): boolean {
+    return Boolean(universalSyncConfig.remote && universalSyncConfig.remoteRoot);
+  }
+
+  function universalRemotePath(
+    id: string,
+    kind: "inbox" | "project",
+  ): string {
+    if (!universalSyncConfig.remoteRoot) return "";
+    return joinRemotePath(
+      universalSyncConfig.remoteRoot,
+      kind === "inbox" ? "Inbox" : `Projects/${id}`,
+    );
+  }
+
+  function joinRemotePath(root: string, child: string): string {
+    return `${normalizeRemoteRoot(root)}/${child.replace(/^\/+/, "")}`;
+  }
+
+  function normalizeRemoteRoot(value: string): string {
+    return value.trim().replace(/^\/+|\/+$/g, "");
+  }
+
+  function updateUniversalSyncSummary(): void {
+    if (syncRunning) return;
+    const included = buildUniversalSyncTargets().filter((target) => target.included);
+    const recovery = included.filter((target) => !!target.recoveryTarget);
+    if (recovery.length > 0) {
+      syncPhase = "error";
+      syncStatus = `${recovery.length} paused`;
+      syncMessage = "Deletion protection paused one or more locations. Use the recovery action beside each affected location.";
+    } else if (included.length === 0) {
+      syncPhase = "local";
+      syncStatus = "Sync off";
+      syncMessage = "Include Inbox or a project to begin.";
+    } else if (included.some((target) => !target.remote || !target.remotePath)) {
+      syncPhase = "local";
+      syncStatus = "Setup required";
+      syncMessage = "Save a universal remote root before syncing new locations.";
+    } else if (included.some((target) => !target.initialized)) {
+      syncPhase = "ready";
+      syncStatus = "Initialization required";
+      syncMessage = "Review the included locations, then start the first sync explicitly.";
+    } else {
+      syncPhase = "ready";
+      syncStatus = universalSyncConfig.automatic ? "Automatic sync on" : "Ready to sync";
+      syncMessage = "All included locations have isolated sync profiles.";
+    }
+  }
+
+  function syncFailureMessage(
+    message: string,
+    deletionGuard: SyncRecoveryTarget | null,
+  ): string {
+    if (deletionGuard === "local") {
+      return "deletion protection found too many missing local files; no changes were made";
+    }
+    if (deletionGuard === "remote") {
+      return "deletion protection found too many missing remote files; no changes were made";
+    }
+    return message;
   }
 
   function syncDeletionGuard(message: string): SyncRecoveryTarget | null {
     if (message.startsWith("SYNC_DELETE_GUARD_LOCAL:")) return "local";
     if (message.startsWith("SYNC_DELETE_GUARD_REMOTE:")) return "remote";
     return null;
-  }
-
-  function safeRemoteFolderName(value: string): string {
-    return value.replace(/[\\/:*?"<>|]/g, "-").trim() || "My Project";
   }
 
   async function openHistory(): Promise<void> {
@@ -1367,7 +1859,7 @@ It passed the abandoned signal house before descending between black pines to th
     syncMenuVisible = false;
 
     if (!libraryPath || !activeSheetPath || !desktopAvailable()) {
-      historyMessage = "History becomes available after opening a project in the desktop app.";
+      historyMessage = "History becomes available after opening a sheet in the desktop app.";
       return;
     }
     historyLoading = true;
@@ -1467,14 +1959,43 @@ It passed the abandoned signal house before descending between black pines to th
     return `${delta > 0 ? "+" : ""}${delta.toLocaleString()} words`;
   }
 
-  async function reopenStoredWorkspace(): Promise<void> {
-    const workspace = loadLastWorkspace();
-    if (!workspace) return;
+  async function initializeDesktopWorkspace(): Promise<void> {
+    const workspace = reopenLastWorkspace ? loadLastWorkspace() : null;
+    let inbox: LibrarySnapshot | null = null;
     loadingLibrary = true;
     try {
-      await activateLibrary(await openLibraryPath(workspace.projectPath), workspace.sheetPath);
+      inbox = await openInboxLibrary();
+      inboxPath = inbox.path;
+      inboxSheetCount = inbox.sheets.length;
+      if (workspace) {
+        try {
+          await activateLibrary(await openLibraryPath(workspace.projectPath), workspace.sheetPath);
+          return;
+        } catch (error) {
+          await activateInbox(
+            inbox,
+            localStorage.getItem("writing-environment.last-inbox-sheet"),
+          );
+          errorMessage = `Could not reopen the last project; Inbox is ready instead: ${errorText(error)}`;
+          return;
+        }
+      }
+      await activateInbox(
+        inbox,
+        localStorage.getItem("writing-environment.last-inbox-sheet"),
+      );
     } catch (error) {
-      errorMessage = error instanceof Error ? error.message : String(error);
+      if (workspace) {
+        try {
+          await activateLibrary(await openLibraryPath(workspace.projectPath), workspace.sheetPath);
+          errorMessage = `Inbox is unavailable: ${errorText(error)}`;
+          return;
+        } catch {
+          // Report the original Inbox failure below; there is no usable workspace.
+        }
+      }
+      clearWorkspace();
+      errorMessage = `Cannot prepare Inbox: ${errorText(error)}`;
     } finally {
       loadingLibrary = false;
     }
@@ -1492,7 +2013,7 @@ It passed the abandoned signal house before descending between black pines to th
   }
 
   function rememberLastWorkspace(): void {
-    if (!reopenLastWorkspace || !libraryPath) return;
+    if (!reopenLastWorkspace || !libraryPath || inboxActive) return;
     const workspace: LastWorkspace = { projectPath: libraryPath, sheetPath: activeSheetPath };
     localStorage.setItem("writing-environment.last-workspace", JSON.stringify(workspace));
   }
@@ -1518,12 +2039,48 @@ It passed the abandoned signal house before descending between black pines to th
     return null;
   }
 
-  async function refreshTrash(): Promise<void> {
-    if (!libraryPath || !desktopAvailable()) {
+  async function refreshUniversalTrash(): Promise<void> {
+    if (!desktopAvailable()) {
       trashItems = [];
       return;
     }
-    trashItems = await listLibraryTrash(libraryPath);
+    const origins = universalTrashOrigins();
+    trashItems = origins.length > 0 ? await listUniversalTrash(origins) : [];
+    if (
+      trashOriginFilter !== "all"
+      && !origins.some((origin) => origin.id === trashOriginFilter)
+    ) {
+      trashOriginFilter = "all";
+    }
+  }
+
+  function universalTrashOrigins(): TrashOrigin[] {
+    const origins: TrashOrigin[] = [];
+    const seen = new Set<string>();
+    if (inboxPath) {
+      seen.add(inboxPath);
+      origins.push({ id: "inbox", name: "Inbox", path: inboxPath, kind: "inbox" });
+    }
+    for (const project of projects) {
+      if (seen.has(project.path)) continue;
+      seen.add(project.path);
+      origins.push({
+        id: project.id,
+        name: project.name,
+        path: project.path,
+        kind: "project",
+      });
+    }
+    return origins;
+  }
+
+  function originForTrashItem(item: UniversalTrashItem): TrashOrigin {
+    return {
+      id: item.originId,
+      name: item.originName,
+      path: item.originPath,
+      kind: item.originKind,
+    };
   }
 
   function handleSearchInput(value: string): void {
@@ -1568,12 +2125,42 @@ It passed the abandoned signal house before descending between black pines to th
     sheetDialogMode = mode;
     dialogSheet = sheet;
     dialogTitle = mode === "rename" ? sheet?.title ?? "" : "";
-    dialogGroup = sheet ? sheetFolder(sheet)
+    dialogGroup = inboxActive && mode === "create"
+      ? "Ungrouped"
+      : sheet ? sheetFolder(sheet)
       : activeGroup !== "All Sheets" && activeGroup !== "Trash"
         ? activeGroup
         : folders[0]?.path ?? "Draft";
-    dialogProjectPath = libraryPath;
+    dialogProjectPath = inboxActive
+      ? sortedProjects.find((project) => project.open)?.path ?? ""
+      : libraryPath;
+    dialogFolders = inboxActive ? [] : folders;
     dialogError = "";
+    if (mode === "move") {
+      if (!dialogProjectPath) {
+        dialogError = "Open a project before moving an Inbox sheet.";
+      } else {
+        void loadDialogProjectFolders(dialogProjectPath);
+      }
+    }
+  }
+
+  async function loadDialogProjectFolders(projectPath: string): Promise<void> {
+    dialogProjectPath = projectPath;
+    try {
+      const snapshot = await openLibraryPath(projectPath);
+      if (dialogProjectPath !== projectPath || sheetDialogMode !== "move") return;
+      dialogFolders = folderSummaries(snapshot.sheets);
+      if (inboxActive && dialogGroup === "Ungrouped") {
+        dialogGroup = dialogFolders[0]?.path ?? "Draft";
+      }
+      dialogError = "";
+    } catch (error) {
+      if (dialogProjectPath === projectPath) {
+        dialogFolders = [];
+        dialogError = `Cannot inspect the destination project: ${errorText(error)}`;
+      }
+    }
   }
 
   function closeSheetDialog(): void {
@@ -1593,7 +2180,11 @@ It passed the abandoned signal house before descending between black pines to th
         throw new Error("Resolve the current sheet’s unsaved changes before modifying the library.");
       }
       if (sheetDialogMode === "create") {
-        const created = await createLibrarySheet(libraryPath, dialogGroup, dialogTitle);
+        const created = await createLibrarySheet(
+          libraryPath,
+          inboxActive ? "Ungrouped" : dialogGroup,
+          dialogTitle,
+        );
         dirty = false;
         await reloadLibrary(created.relativePath, true);
       } else if (sheetDialogMode === "rename" && dialogSheet) {
@@ -1606,8 +2197,12 @@ It passed the abandoned signal house before descending between black pines to th
         dirty = false;
         await reloadLibrary(wasActive ? renamed.relativePath : activeSheetPath, wasActive);
       } else if (sheetDialogMode === "move" && dialogSheet) {
+        const sourceWasInbox = inboxActive;
         const sourceProjectPath = libraryPath;
         const destinationProjectPath = dialogProjectPath || sourceProjectPath;
+        if (inboxActive && !dialogProjectPath) {
+          throw new Error("Open a destination project before moving this Inbox sheet.");
+        }
         const moved = destinationProjectPath === sourceProjectPath
           ? await moveLibrarySheet(sourceProjectPath, dialogSheet.relativePath, dialogGroup)
           : await moveLibrarySheetToProject(
@@ -1621,6 +2216,7 @@ It passed the abandoned signal house before descending between black pines to th
         if (destinationProjectPath === sourceProjectPath) {
           await reloadLibrary(wasActive ? moved.relativePath : activeSheetPath, wasActive);
         } else {
+          if (sourceWasInbox) inboxSheetCount = Math.max(0, inboxSheetCount - 1);
           await activateLibrary(
             await openLibraryPath(destinationProjectPath),
             moved.relativePath,
@@ -1632,7 +2228,7 @@ It passed the abandoned signal house before descending between black pines to th
         dirty = false;
         await reloadLibrary(wasActive ? null : activeSheetPath, false);
       }
-      scheduleAutomaticSync();
+      if (!inboxActive) scheduleAutomaticSync();
       sheetDialogMode = null;
       dialogSheet = null;
       errorMessage = "";
@@ -1658,7 +2254,7 @@ It passed the abandoned signal house before descending between black pines to th
       );
       dirty = false;
       await reloadLibrary(duplicated.relativePath, true);
-      scheduleAutomaticSync();
+      if (!inboxActive) scheduleAutomaticSync();
       errorMessage = "";
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : String(error);
@@ -1667,14 +2263,22 @@ It passed the abandoned signal house before descending between black pines to th
     }
   }
 
-  async function restoreTrashItem(item: TrashItem): Promise<void> {
-    if (!libraryPath) return;
+  async function restoreTrashItem(item: UniversalTrashItem): Promise<void> {
     mutatingLibrary = true;
     try {
-      const restored = await restoreLibraryTrash(libraryPath, item.id);
-      await reloadLibrary(restored.relativePath, true);
-      activeGroup = sheetFolder(restored);
-      scheduleAutomaticSync();
+      const restored = await restoreUniversalTrash(
+        originForTrashItem(item),
+        item.id,
+        !item.originAvailable,
+      );
+      if (restored.restoredToInbox || item.originKind === "inbox") {
+        await activateInbox(await openInboxLibrary(), restored.sheet.relativePath);
+      } else {
+        await activateLibrary(
+          await openLibraryPath(restored.root),
+          restored.sheet.relativePath,
+        );
+      }
       errorMessage = "";
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : String(error);
@@ -1684,7 +2288,7 @@ It passed the abandoned signal house before descending between black pines to th
   }
 
   function openEmptyTrashConfirmation(): void {
-    if (!libraryPath || trashItems.length === 0 || mutatingLibrary) return;
+    if (filteredTrashItems.length === 0 || mutatingLibrary) return;
     emptyTrashError = "";
     emptyTrashConfirmVisible = true;
   }
@@ -1696,12 +2300,15 @@ It passed the abandoned signal house before descending between black pines to th
   }
 
   async function emptyTrash(): Promise<void> {
-    if (!libraryPath || trashItems.length === 0 || mutatingLibrary) return;
+    if (filteredTrashItems.length === 0 || mutatingLibrary) return;
     mutatingLibrary = true;
     emptyTrashError = "";
     try {
-      await emptyLibraryTrash(libraryPath);
-      await refreshTrash();
+      await emptyUniversalTrashItems(
+        universalTrashOrigins(),
+        trashOriginFilter === "all" ? null : trashOriginFilter,
+      );
+      await refreshUniversalTrash();
       emptyTrashConfirmVisible = false;
       errorMessage = "";
     } catch (error) {
@@ -1720,7 +2327,12 @@ It passed the abandoned signal house before descending between black pines to th
     libraryName = snapshot.name;
     sheets = snapshot.sheets;
     folders = folderSummaries(snapshot.sheets);
-    await refreshTrash();
+    if (inboxActive) {
+      libraryName = "Inbox";
+      inboxSheetCount = snapshot.sheets.length;
+      folders = [];
+    }
+    await refreshUniversalTrash();
     if (searchQuery.trim()) handleSearchInput(searchQuery);
 
     const preferred = preferredSheetPath
@@ -1732,7 +2344,7 @@ It passed the abandoned signal house before descending between black pines to th
         await selectSheet(target, true);
       } else {
         activeSheet = target.title;
-        activeGroup = sheetFolder(target);
+        if (!trashActive) activeGroup = inboxActive ? "Inbox" : sheetFolder(target);
       }
     } else {
       clearEditorForEmptyLibrary();
@@ -1741,8 +2353,12 @@ It passed the abandoned signal house before descending between black pines to th
 
   function rememberProject(selected: LibrarySnapshot, sheetPath: string | null): void {
     const existing = projects.find((project) => project.path === selected.path);
+    const identity = selected.projectId ?? existing?.id ?? createProjectId();
+    if (existing && existing.id !== identity) {
+      migrateSyncTargetIdentity(existing.id, identity);
+    }
     const bookmark: ProjectBookmark = {
-      id: existing?.id ?? createProjectId(),
+      id: identity,
       name: selected.name,
       path: selected.path,
       pinned: existing?.pinned ?? false,
@@ -1754,10 +2370,11 @@ It passed the abandoned signal house before descending between black pines to th
 
     projects = [bookmark, ...others];
     saveProjects();
+    migrateLegacySyncPreferences();
   }
 
   function rememberActiveProjectSheet(sheetPath: string | null): void {
-    if (!libraryPath) return;
+    if (!libraryPath || inboxActive) return;
     projects = projects.map((project) =>
       project.path === libraryPath ? { ...project, lastSheetPath: sheetPath } : project,
     );
@@ -2033,6 +2650,20 @@ It passed the abandoned signal house before descending between black pines to th
       <span>Writing Environment</span>
     </div>
 
+    <section class="inbox-section" aria-label="Inbox">
+      <button
+        class:active={inboxActive && !trashActive}
+        class="nav-row inbox-row"
+        disabled={loadingLibrary}
+        title={inboxPath ?? "Universal Inbox"}
+        onclick={() => void openInbox()}
+      >
+        <span class="nav-icon" aria-hidden="true">▱</span>
+        <span>Inbox</span>
+        <span class="count">{inboxSheetCount}</span>
+      </button>
+    </section>
+
     <section class="projects-section" aria-label="Projects">
       <div class="section-heading">
         <p class="eyebrow">Projects</p>
@@ -2129,16 +2760,6 @@ It passed the abandoned signal house before descending between black pines to th
                       <span class="count">{folder.count}</span>
                     </button>
                   {/each}
-                  <div class="project-tree-separator"></div>
-                  <button
-                    class:active={activeGroup === "Trash"}
-                    class="project-tree-row"
-                    onclick={() => selectFolder("Trash")}
-                  >
-                    <span aria-hidden="true">♲</span>
-                    <span>Trash</span>
-                    <span class="count">{trashItems.length}</span>
-                  </button>
                 </nav>
               {/if}
             </div>
@@ -2147,6 +2768,19 @@ It passed the abandoned signal house before descending between black pines to th
       {:else}
         <p class="projects-empty">No project is open. Favorite projects stay here for quick access.</p>
       {/if}
+    </section>
+
+    <section class="trash-section" aria-label="Trash">
+      <button
+        class:active={trashActive}
+        class="nav-row trash-row"
+        disabled={loadingLibrary || mutatingLibrary}
+        onclick={() => void selectUniversalTrash()}
+      >
+        <span class="nav-icon" aria-hidden="true">♲</span>
+        <span>Trash</span>
+        <span class="count">{trashItems.length}</span>
+      </button>
     </section>
 
     <div class="library-footer">
@@ -2160,15 +2794,26 @@ It passed the abandoned signal house before descending between black pines to th
   <section class="sheet-list" aria-label="Sheets">
     <header class="panel-header">
       <div>
-        <p class="eyebrow">{searchQuery.trim() ? "Project" : "Folder"}</p>
+        <p class="eyebrow">{trashActive ? "Recovery" : searchQuery.trim() ? (inboxActive ? "Inbox" : "Project") : inboxActive ? "Library" : "Folder"}</p>
         <h1>{searchQuery.trim() ? "Search" : activeGroup}</h1>
       </div>
       <div class="panel-header-actions">
-        {#if activeGroup === "Trash"}
+        {#if trashActive}
+          <select
+            class="trash-origin-filter"
+            aria-label="Filter Trash by origin"
+            value={trashOriginFilter}
+            onchange={(event) => (trashOriginFilter = event.currentTarget.value)}
+          >
+            <option value="all">All origins</option>
+            {#each universalTrashOrigins() as origin}
+              <option value={origin.id}>{origin.name}</option>
+            {/each}
+          </select>
           <button
             class="empty-trash-button"
-            disabled={!libraryPath || trashItems.length === 0 || mutatingLibrary}
-            title={trashItems.length === 0 ? "Trash is already empty" : "Permanently empty Trash"}
+            disabled={filteredTrashItems.length === 0 || mutatingLibrary}
+            title={filteredTrashItems.length === 0 ? "This Trash view is already empty" : "Permanently empty this Trash view"}
             onclick={openEmptyTrashConfirmation}
           >Empty Trash</button>
         {:else}
@@ -2216,32 +2861,37 @@ It passed the abandoned signal house before descending between black pines to th
       </div>
     </header>
 
-    <div class="library-search">
-      <span aria-hidden="true">⌕</span>
-      <input
-        type="search"
-        placeholder="Search every sheet"
-        aria-label="Search library"
-        value={searchQuery}
-        oninput={(event) => handleSearchInput(event.currentTarget.value)}
-      />
-      {#if searching}<span class="searching" aria-label="Searching">•••</span>{/if}
-    </div>
+    {#if !trashActive}
+      <div class="library-search">
+        <span aria-hidden="true">⌕</span>
+        <input
+          type="search"
+          placeholder={inboxActive ? "Search Inbox" : "Search every sheet"}
+          aria-label="Search library"
+          value={searchQuery}
+          oninput={(event) => handleSearchInput(event.currentTarget.value)}
+        />
+        {#if searching}<span class="searching" aria-label="Searching">•••</span>{/if}
+      </div>
+    {/if}
 
-    <div class="sheets">
-      {#if activeGroup === "Trash" && !searchQuery.trim()}
-        {#each trashItems as item}
+    <div class:trash-view={trashActive} class="sheets">
+      {#if trashActive}
+        {#each filteredTrashItems as item}
           <article class="trash-card">
             <strong>{item.title}</strong>
-            <span>{item.originalRelativePath}</span>
+            <span>{item.originName} · {item.originalRelativePath}</span>
+            {#if !item.originAvailable}
+              <small class="trash-origin-warning">Original folder unavailable</small>
+            {/if}
             <div>
               <small>{formatTrashDate(item.trashedAt)}</small>
-              <button disabled={mutatingLibrary} onclick={() => void restoreTrashItem(item)}>Restore</button>
+              <button disabled={mutatingLibrary} onclick={() => void restoreTrashItem(item)}>{item.originAvailable ? "Restore" : "Restore to Inbox"}</button>
             </div>
           </article>
         {/each}
-        {#if trashItems.length === 0}
-          <p class="empty-state">Trash is empty. Removed sheets will remain recoverable here.</p>
+        {#if filteredTrashItems.length === 0}
+          <p class="empty-state">{trashOriginFilter === "all" ? "Trash is empty. Removed sheets will remain recoverable here." : "No removed sheets from this location."}</p>
         {/if}
       {:else}
         {#each visibleSheets as sheet}
@@ -2266,7 +2916,7 @@ It passed the abandoned signal house before descending between black pines to th
                 <div class="sheet-actions-menu" role="menu">
                   <button role="menuitem" onclick={() => openSheetDialog("rename", sheet)}>Rename</button>
                   <button role="menuitem" onclick={() => void duplicateSheet(sheet)}>Duplicate</button>
-                  <button role="menuitem" onclick={() => openSheetDialog("move", sheet)}>Move to folder…</button>
+                  <button role="menuitem" onclick={() => openSheetDialog("move", sheet)}>{inboxActive ? "Move to project…" : "Move to folder or project…"}</button>
                   <div></div>
                   <button class="danger-action" role="menuitem" onclick={() => openSheetDialog("trash", sheet)}>Move to Trash</button>
                 </div>
@@ -2328,100 +2978,138 @@ It passed the abandoned signal house before descending between black pines to th
             class:active={syncMenuVisible || syncPhase === "syncing" || syncPhase === "conflict"}
             class:error={syncPhase === "error"}
             class="sync-button"
-            disabled={desktopMode && !libraryPath}
-            aria-label={`Project sync: ${syncStatus}`}
+            aria-label={`Universal sync: ${syncStatus}`}
             aria-haspopup="dialog"
             aria-expanded={syncMenuVisible}
-            title={`Project sync: ${syncStatus}`}
+            title={`Universal sync: ${syncStatus}`}
             onclick={openSyncMenu}
           >
             <span class="sync-symbol" aria-hidden="true">↕</span>
             <span>Sync</span>
-            <small>{syncRunning ? "Working" : syncRecoveryTarget ? "Paused" : syncPreference.automatic ? "Auto" : syncPreference.initialized ? "Ready" : "Off"}</small>
+            <small>{syncRunning
+              ? "Working"
+              : universalSyncTargets.some((target) => target.included && target.recoveryTarget)
+                ? "Paused"
+                : universalSyncConfig.automatic
+                  ? "Auto"
+                  : syncNeedsInitialization
+                    ? "Setup"
+                    : universalSyncConfigured() ? "Ready" : "Off"}</small>
           </button>
 
           {#if syncMenuVisible}
-            <div class="sync-menu" role="dialog" aria-label="Project sync">
+            <div class="sync-menu universal-sync-menu" role="dialog" aria-label="Universal sync">
               <div class="sync-menu-heading">
                 <div>
-                  <p class="eyebrow">Project sync</p>
+                  <p class="eyebrow">Universal sync</p>
                   <strong>{syncStatus}</strong>
                 </div>
                 <span class:working={syncRunning} class:error={syncPhase === "error"} class:conflict={syncPhase === "conflict"} class="sync-indicator"></span>
               </div>
 
-              {#if !libraryPath}
-                <p class="sync-message">Open a project folder before configuring sync.</p>
-              {:else}
-                <label for="sync-remote">rclone remote</label>
-                <div class="sync-field-row">
-                  <select
-                    id="sync-remote"
-                    value={syncDraftRemote}
-                    disabled={syncRunning || !syncAvailability?.compatible}
-                    onchange={(event) => (syncDraftRemote = event.currentTarget.value)}
-                  >
-                    <option value="">Choose a remote…</option>
-                    {#each syncAvailability?.remotes ?? [] as remote}
-                      <option value={remote}>{remote}</option>
-                    {/each}
-                  </select>
-                  <button disabled={refreshingSync || syncRunning} title="Refresh rclone remotes" onclick={() => void refreshSyncAvailability()}>↻</button>
-                </div>
+              <label for="sync-remote">rclone remote</label>
+              <div class="sync-field-row">
+                <select
+                  id="sync-remote"
+                  value={syncDraftRemote}
+                  disabled={syncRunning || !syncAvailability?.compatible}
+                  onchange={(event) => (syncDraftRemote = event.currentTarget.value)}
+                >
+                  <option value="">Choose a remote…</option>
+                  {#each syncAvailability?.remotes ?? [] as remote}
+                    <option value={remote}>{remote}</option>
+                  {/each}
+                </select>
+                <button disabled={refreshingSync || syncRunning} title="Refresh rclone remotes" onclick={() => void refreshSyncAvailability()}>↻</button>
+              </div>
 
-                <label for="sync-path">Remote folder</label>
-                <input
-                  id="sync-path"
-                  type="text"
-                  spellcheck="false"
-                  value={syncDraftPath}
-                  disabled={syncRunning}
-                  oninput={(event) => (syncDraftPath = event.currentTarget.value)}
-                />
+              <label for="sync-path">Universal remote root</label>
+              <input
+                id="sync-path"
+                type="text"
+                spellcheck="false"
+                placeholder="Writing Environment"
+                value={syncDraftPath}
+                disabled={syncRunning}
+                oninput={(event) => (syncDraftPath = event.currentTarget.value)}
+              />
+              <button
+                class="sync-secondary"
+                disabled={syncRunning || !syncDraftRemote || !syncDraftPath.trim()}
+                onclick={saveUniversalSyncRoot}
+              >Save universal root</button>
 
-                <p class:error-text={syncPhase === "error"} class="sync-message">
-                  {syncMessage || "Credentials remain in rclone’s own configuration, outside your manuscript."}
-                </p>
-
-                {#if syncNeedsInitialization}
-                  <p class="sync-safety-note"><strong>First sync:</strong> this remote folder must be empty. The local project becomes its starting copy.</p>
-                {/if}
-
-                {#if syncRecoveryTarget}
-                  <div class="sync-recovery-note">
-                    <strong>Deletion protection stopped sync.</strong>
-                    <p>{syncRecoveryTarget === "local"
-                      ? "Restore only files that exist remotely but are missing from this project. Existing local files will not be replaced."
-                      : "Restore only files that exist locally but are missing remotely. Existing remote files will not be replaced."}</p>
-                    <button
-                      class="sync-primary"
-                      disabled={syncRunning}
-                      onclick={() => void recoverPausedSync()}
-                    >{syncRecoveryTarget === "local" ? "Restore missing local files" : "Restore missing remote files"}</button>
-                    <small>Automatic sync will remain off until you turn it back on.</small>
+              <div class="sync-targets">
+                <p class="eyebrow">Included locations</p>
+                {#each universalSyncTargets as target}
+                  <div class:legacy={target.legacy} class:paused={!!target.recoveryTarget} class="sync-target">
+                    <label class="sync-target-toggle">
+                      <span>
+                        <strong>{target.name}</strong>
+                        <small>{target.kind === "inbox" ? "Universal Inbox" : target.legacy ? "Preserved existing location" : target.remotePath || "Universal root required"}</small>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={target.included}
+                        disabled={syncRunning}
+                        onchange={(event) => void setUniversalTargetIncluded(target, event.currentTarget.checked)}
+                      />
+                    </label>
+                    {#if target.included}
+                      <div class="sync-target-state">
+                        <span>{target.recoveryTarget ? "Paused for recovery" : target.initialized ? "Initialized" : "First sync required"}</span>
+                        {#if target.legacy}
+                          <button
+                            disabled={syncRunning || !universalSyncConfigured()}
+                            onclick={() => void useUniversalLocation(target)}
+                          >Use universal location…</button>
+                        {/if}
+                      </div>
+                      {#if target.recoveryTarget}
+                        <div class="sync-recovery-note">
+                          <strong>Deletion protection stopped this location.</strong>
+                          <p>{target.recoveryTarget === "local"
+                            ? "Restore only remote files missing locally. Existing local files will not be replaced."
+                            : "Restore only local files missing remotely. Existing remote files will not be replaced."}</p>
+                          <button
+                            class="sync-primary"
+                            disabled={syncRunning}
+                            onclick={() => void recoverPausedSync(target)}
+                          >{target.recoveryTarget === "local" ? "Restore missing local files" : "Restore missing remote files"}</button>
+                        </div>
+                      {/if}
+                    {/if}
                   </div>
-                {/if}
+                {/each}
+              </div>
 
-                <button
-                  class="sync-primary"
-                  disabled={syncRunning || !!syncRecoveryTarget || !syncAvailability?.compatible || !syncDraftRemote || !syncDraftPath.trim()}
-                  onclick={() => void runProjectSync(false)}
-                >{syncRunning ? "Syncing…" : syncNeedsInitialization ? "Initialize sync" : "Sync now"}</button>
+              <p class:error-text={syncPhase === "error"} class="sync-message">
+                {syncMessage || "Credentials remain in rclone’s own configuration, outside your manuscripts."}
+              </p>
 
-                <label class:disabled={syncNeedsInitialization} class="toggle-setting sync-toggle">
-                  <span>
-                    <strong>Automatic sync</strong>
-                    <small>After local saves and every five minutes while the app is open.</small>
-                  </span>
-                  <input
-                    type="checkbox"
-                    checked={syncPreference.automatic}
-                    disabled={syncNeedsInitialization || syncRunning || !!syncRecoveryTarget}
-                    onchange={(event) => setAutomaticSync(event.currentTarget.checked)}
-                  />
-                </label>
-                <p class="setting-note">Configure Dropbox or another provider once with <code>rclone config</code>. Conflicts are kept as separate, visible Markdown sheets.</p>
+              {#if syncNeedsInitialization}
+                <p class="sync-safety-note"><strong>First sync:</strong> every new destination must be empty. No initialization starts until you review a separate confirmation.</p>
               {/if}
+
+              <button
+                class="sync-primary"
+                disabled={syncRunning || !syncAvailability?.compatible || !universalSyncTargets.some((target) => target.included)}
+                onclick={() => void runUniversalSync(false)}
+              >{syncRunning ? "Syncing…" : syncNeedsInitialization ? "Review and initialize…" : "Sync included now"}</button>
+
+              <label class:disabled={syncNeedsInitialization} class="toggle-setting sync-toggle">
+                <span>
+                  <strong>Automatic universal sync</strong>
+                  <small>Runs included initialized locations sequentially after saves and every five minutes.</small>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={universalSyncConfig.automatic}
+                  disabled={syncNeedsInitialization || syncRunning || universalSyncTargets.some((target) => target.included && !!target.recoveryTarget)}
+                  onchange={(event) => setAutomaticSync(event.currentTarget.checked)}
+                />
+              </label>
+              <p class="setting-note">Each location keeps an isolated rclone state, archive, conflict boundary, and deletion guard.</p>
             </div>
           {/if}
         </div>
@@ -2795,7 +3483,7 @@ It passed the abandoned signal house before descending between black pines to th
     <footer class="editor-status">
       <div class="editor-status-left">
         <span><span class:error-dot={saveStatus.includes("failed")} class="status-dot"></span>{saveStatus}</span>
-        {#if libraryPath}
+        {#if desktopMode}
           <span class:error-text={syncPhase === "error"} class:conflict-text={syncPhase === "conflict"} class="sync-footer-status">↕ {syncStatus}</span>
         {/if}
       </div>
@@ -2952,15 +3640,61 @@ It passed the abandoned signal house before descending between black pines to th
         <p class="eyebrow">Trash</p>
         <h2>Empty Trash permanently?</h2>
         <p class="trash-confirmation">
-          This will permanently delete {trashItems.length} {trashItems.length === 1 ? "sheet" : "sheets"}
-          from this project’s Trash. This cannot be undone. Your current project files and History
-          will not be affected.
+          This will permanently delete {filteredTrashItems.length} {filteredTrashItems.length === 1 ? "sheet" : "sheets"}
+          {trashOriginFilter === "all" ? "from every registered location" : `from ${filteredTrashItems[0]?.originName ?? "the selected location"}`}.
+          This cannot be undone. Current Markdown files and History will not be affected.
         </p>
         {#if emptyTrashError}<p class="dialog-error" role="alert">{emptyTrashError}</p>{/if}
         <div class="dialog-actions">
           <button type="button" disabled={mutatingLibrary} onclick={closeEmptyTrashConfirmation}>Cancel</button>
           <button class="danger-primary" type="submit" disabled={mutatingLibrary}>
             {mutatingLibrary ? "Emptying…" : "Empty Trash"}
+          </button>
+        </div>
+      </form>
+    </div>
+  {/if}
+
+  {#if syncInitializationConfirmVisible}
+    <div class="modal-layer" role="presentation">
+      <button
+        class="modal-backdrop"
+        aria-label="Cancel first sync"
+        onclick={() => {
+          if (!syncRunning) syncInitializationConfirmVisible = false;
+        }}
+      ></button>
+      <form
+        class="sheet-dialog sync-initialization-dialog"
+        aria-label="Confirm first universal sync"
+        onsubmit={(event) => {
+          event.preventDefault();
+          void runUniversalSync(false, true);
+        }}
+      >
+        <p class="eyebrow">Universal sync</p>
+        <h2>Initialize new remote locations?</h2>
+        <p class="trash-confirmation">
+          Each destination below must be empty. Its local Markdown folder will become the starting
+          copy. Existing legacy remote folders are not moved or deleted.
+        </p>
+        <div class="sync-initialization-list">
+          {#each universalSyncTargets.filter((target) => target.included && !target.initialized) as target}
+            <div>
+              <strong>{target.name}</strong>
+              <small>{target.remote}:{target.remotePath}</small>
+            </div>
+          {/each}
+        </div>
+        {#if syncInitializationError}<p class="dialog-error" role="alert">{syncInitializationError}</p>{/if}
+        <div class="dialog-actions">
+          <button
+            type="button"
+            disabled={syncRunning}
+            onclick={() => (syncInitializationConfirmVisible = false)}
+          >Cancel</button>
+          <button class="sync-primary" type="submit" disabled={syncRunning}>
+            {syncRunning ? "Initializing…" : "Confirm first sync"}
           </button>
         </div>
       </form>
@@ -3006,16 +3740,17 @@ It passed the abandoned signal house before descending between black pines to th
           <select
             id="sheet-project"
             value={dialogProjectPath}
-            oninput={(event) => (dialogProjectPath = event.currentTarget.value)}
+            oninput={(event) => void loadDialogProjectFolders(event.currentTarget.value)}
           >
+            {#if !dialogProjectPath}<option value="">Open a project first…</option>{/if}
             {#each sortedProjects.filter((project) => project.open) as project}
               <option value={project.path}>{project.name}</option>
             {/each}
           </select>
         {/if}
 
-        {#if sheetDialogMode === "create" || sheetDialogMode === "move"}
-          <label for="sheet-group">Project folder</label>
+        {#if (sheetDialogMode === "create" && !inboxActive) || sheetDialogMode === "move"}
+          <label for="sheet-group">{sheetDialogMode === "move" ? "Destination folder" : "Project folder"}</label>
           <input
             id="sheet-group"
             type="text"
@@ -3026,16 +3761,20 @@ It passed the abandoned signal house before descending between black pines to th
             oninput={(event) => (dialogGroup = event.currentTarget.value)}
           />
           <datalist id="known-groups">
-            {#each folders as folder}
+            {#each dialogFolders as folder}
               <option value={folder.path}></option>
             {/each}
           </datalist>
-          <p class="dialog-note">Choose an open project and type a folder path such as Research/Locations.</p>
+          <p class="dialog-note">{sheetDialogMode === "move" ? "Choose an open project and type a folder path such as Research/Locations." : "Type a folder path such as Research/Locations."}</p>
+        {/if}
+
+        {#if sheetDialogMode === "create" && inboxActive}
+          <p class="dialog-note">This sheet will be saved as ordinary Markdown in your Inbox.</p>
         {/if}
 
         {#if sheetDialogMode === "trash"}
           <p class="trash-confirmation">
-            <strong>{dialogSheet?.title}</strong> will leave the project folder, but it can be restored from Trash.
+            <strong>{dialogSheet?.title}</strong> will leave {inboxActive ? "Inbox" : "the project folder"}, but it can be restored from universal Trash.
           </p>
         {/if}
 
@@ -3043,7 +3782,11 @@ It passed the abandoned signal house before descending between black pines to th
 
         <div class="dialog-actions">
           <button type="button" disabled={mutatingLibrary} onclick={closeSheetDialog}>Cancel</button>
-          <button class:danger-primary={sheetDialogMode === "trash"} type="submit" disabled={mutatingLibrary}>
+          <button
+            class:danger-primary={sheetDialogMode === "trash"}
+            type="submit"
+            disabled={mutatingLibrary || (sheetDialogMode === "move" && !dialogProjectPath)}
+          >
             {mutatingLibrary
               ? "Working…"
               : sheetDialogMode === "create"

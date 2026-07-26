@@ -1,5 +1,6 @@
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
@@ -13,6 +14,7 @@ mod search_index;
 mod sync;
 
 const REVISION_LIMIT: usize = 30;
+const PROJECT_ID_MARKER: &str = ".writing-environment-project-id";
 const EXTERNAL_CHANGE_ERROR: &str =
     "EXTERNAL_CHANGE: This sheet changed on disk while you were writing. Your unsaved text is still open.";
 
@@ -104,6 +106,7 @@ fn set_presentation_mode(window: tauri::WebviewWindow, active: bool) -> Result<b
 struct LibrarySnapshot {
     name: String,
     path: String,
+    project_id: Option<String>,
     sheets: Vec<SheetSummary>,
     warnings: Vec<String>,
 }
@@ -163,6 +166,37 @@ struct TrashItem {
     trashed_at: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TrashOrigin {
+    id: String,
+    name: String,
+    path: String,
+    kind: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UniversalTrashItem {
+    id: String,
+    title: String,
+    original_relative_path: String,
+    trashed_at: String,
+    origin_id: String,
+    origin_name: String,
+    origin_path: String,
+    origin_kind: String,
+    origin_available: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TrashRestoreResult {
+    root: String,
+    restored_to_inbox: bool,
+    sheet: SheetSummary,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RevisionSummary {
@@ -180,7 +214,20 @@ fn open_library(app: tauri::AppHandle, path: String) -> Result<LibrarySnapshot, 
         return Err("The selected library is not a folder.".into());
     }
 
-    let scan = match search_index_path(&app, &root)
+    open_library_root(&app, root)
+}
+
+#[tauri::command]
+fn open_inbox(app: tauri::AppHandle) -> Result<LibrarySnapshot, String> {
+    let root = inbox_library_dir(&app)?;
+    fs::create_dir_all(&root)
+        .map_err(|error| format!("Cannot create the Inbox folder: {error}"))?;
+    let root = fs::canonicalize(&root).map_err(|error| format!("Cannot open Inbox: {error}"))?;
+    open_library_root(&app, root)
+}
+
+fn open_library_root(app: &tauri::AppHandle, root: PathBuf) -> Result<LibrarySnapshot, String> {
+    let scan = match search_index_path(app, &root)
         .and_then(|index_path| search_index::synchronize(&index_path, &root))
     {
         Ok(scan) => scan,
@@ -212,10 +259,49 @@ fn library_snapshot(root: PathBuf, scan: LibraryScan) -> Result<LibrarySnapshot,
 
     Ok(LibrarySnapshot {
         name,
+        project_id: read_project_identity(&root),
         path: root.to_string_lossy().into_owned(),
         sheets: scan.sheets,
         warnings: scan.warnings,
     })
+}
+
+#[tauri::command]
+fn ensure_project_identity(root: String, preferred_id: String) -> Result<String, String> {
+    let root = canonical_library_root(&root)?;
+    ensure_project_identity_in(&root, &preferred_id)
+}
+
+fn ensure_project_identity_in(root: &Path, preferred_id: &str) -> Result<String, String> {
+    if let Some(identity) = read_project_identity(root) {
+        return Ok(identity);
+    }
+
+    let identity = Uuid::parse_str(preferred_id.trim())
+        .unwrap_or_else(|_| Uuid::new_v4())
+        .to_string();
+    let marker = root.join(PROJECT_ID_MARKER);
+    match OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&marker)
+    {
+        Ok(mut file) => {
+            file.write_all(format!("{identity}\n").as_bytes())
+                .and_then(|_| file.sync_all())
+                .map_err(|error| format!("Cannot save the project sync identity: {error}"))?;
+            sync_parent(&marker)?;
+            Ok(identity)
+        }
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => read_project_identity(root)
+            .ok_or_else(|| "The project identity marker is not a valid identifier.".to_string()),
+        Err(error) => Err(format!("Cannot create the project sync identity: {error}")),
+    }
+}
+
+fn read_project_identity(root: &Path) -> Option<String> {
+    let value = fs::read_to_string(root.join(PROJECT_ID_MARKER)).ok()?;
+    Uuid::parse_str(value.trim()).ok().map(|id| id.to_string())
 }
 
 fn scan_library_sheets(root: &Path) -> Result<LibraryScan, String> {
@@ -529,14 +615,7 @@ fn move_sheet_between_projects_on_disk(
         .map_err(|error| format!("Cannot read sheet before moving it: {error}"))?;
     decode_markdown_bytes(&content).map_err(|_| invalid_utf8_warning(Path::new(relative_path)))?;
 
-    create_new_file(&target, &content)?;
-    let copied = fs::read(&target)
-        .map_err(|error| format!("Cannot verify the destination sheet: {error}"))?;
-    if copied != content {
-        return Err(
-            "The destination copy did not verify; the original sheet was left untouched.".into(),
-        );
-    }
+    create_verified_destination(&target, &content)?;
     let summary = summarize_existing(&canonical_destination_root, &target)?;
 
     fs::remove_file(&source).map_err(|error| {
@@ -547,6 +626,31 @@ fn move_sheet_between_projects_on_disk(
     }
 
     Ok(summary)
+}
+
+fn create_verified_destination(target: &Path, content: &[u8]) -> Result<(), String> {
+    let parent = target
+        .parent()
+        .ok_or_else(|| "The destination sheet has no parent folder.".to_string())?;
+    let mut temporary = NamedTempFile::new_in(parent)
+        .map_err(|error| format!("Cannot prepare the destination sheet: {error}"))?;
+    temporary
+        .write_all(content)
+        .and_then(|_| temporary.as_file().sync_all())
+        .map_err(|error| format!("Cannot flush the destination sheet: {error}"))?;
+    temporary
+        .persist_noclobber(target)
+        .map_err(|error| format!("Cannot place the destination sheet safely: {}", error.error))?;
+    sync_parent(target)?;
+
+    let copied = fs::read(target)
+        .map_err(|error| format!("Cannot verify the destination sheet: {error}"))?;
+    if copied != content {
+        return Err(
+            "The destination copy did not verify; the original sheet was left untouched.".into(),
+        );
+    }
+    Ok(())
 }
 
 fn move_sheet_on_disk(
@@ -643,6 +747,61 @@ fn list_trash_from(trash: &Path) -> Result<Vec<TrashItem>, String> {
 }
 
 #[tauri::command]
+fn list_universal_trash(
+    app: tauri::AppHandle,
+    origins: Vec<TrashOrigin>,
+) -> Result<Vec<UniversalTrashItem>, String> {
+    let mut universal = Vec::new();
+    let mut visited = HashSet::new();
+
+    for origin in origins {
+        let (root, available) = trash_origin_root(&origin.path)?;
+        let trash = trash_library_dir(&app, &root)?;
+        if !visited.insert(trash.clone()) {
+            continue;
+        }
+        universal.extend(
+            list_trash_from(&trash)?
+                .into_iter()
+                .map(|item| universal_trash_item(item, &origin, available)),
+        );
+    }
+
+    universal.sort_by(|left, right| right.trashed_at.cmp(&left.trashed_at));
+    Ok(universal)
+}
+
+fn universal_trash_item(
+    item: TrashItem,
+    origin: &TrashOrigin,
+    origin_available: bool,
+) -> UniversalTrashItem {
+    UniversalTrashItem {
+        id: item.id,
+        title: item.title,
+        original_relative_path: item.original_relative_path,
+        trashed_at: item.trashed_at,
+        origin_id: origin.id.clone(),
+        origin_name: origin.name.clone(),
+        origin_path: origin.path.clone(),
+        origin_kind: origin.kind.clone(),
+        origin_available,
+    }
+}
+
+fn trash_origin_root(path: &str) -> Result<(PathBuf, bool), String> {
+    let supplied = PathBuf::from(path);
+    if !supplied.is_absolute() {
+        return Err("A Trash origin path must be absolute.".into());
+    }
+    match fs::canonicalize(&supplied) {
+        Ok(root) if root.is_dir() => Ok((root, true)),
+        Ok(root) => Ok((root, false)),
+        Err(_) => Ok((supplied, false)),
+    }
+}
+
+#[tauri::command]
 fn empty_trash(app: tauri::AppHandle, root: String) -> Result<usize, String> {
     let canonical_root = canonical_library_root(&root)?;
     let trash = trash_library_dir(&app, &canonical_root)?;
@@ -650,12 +809,17 @@ fn empty_trash(app: tauri::AppHandle, root: String) -> Result<usize, String> {
 }
 
 fn empty_trash_from(trash: &Path) -> Result<usize, String> {
+    let item_dirs = validated_trash_item_dirs(trash)?;
+    remove_validated_trash_items(&[(trash.to_path_buf(), item_dirs)])
+}
+
+fn validated_trash_item_dirs(trash: &Path) -> Result<Vec<PathBuf>, String> {
     if !trash.exists() {
-        return Ok(0);
+        return Ok(Vec::new());
     }
 
     // Validate the complete set first. This keeps an unexpected file or link from
-    // turning a project-scoped cleanup into a partial or overly broad deletion.
+    // turning a cleanup into a partial or overly broad deletion.
     let mut item_dirs = Vec::new();
     for entry in fs::read_dir(trash).map_err(|error| format!("Cannot inspect Trash: {error}"))? {
         let entry = entry.map_err(|error| format!("Cannot inspect a Trash item: {error}"))?;
@@ -688,17 +852,57 @@ fn empty_trash_from(trash: &Path) -> Result<usize, String> {
         item_dirs.push(item_dir);
     }
 
-    for item_dir in &item_dirs {
-        fs::remove_dir_all(item_dir)
-            .map_err(|error| format!("Cannot permanently remove a Trash item: {error}"))?;
+    Ok(item_dirs)
+}
+
+fn remove_validated_trash_items(partitions: &[(PathBuf, Vec<PathBuf>)]) -> Result<usize, String> {
+    let mut removed = 0;
+    for (trash, item_dirs) in partitions {
+        for item_dir in item_dirs {
+            fs::remove_dir_all(item_dir)
+                .map_err(|error| format!("Cannot permanently remove a Trash item: {error}"))?;
+            removed += 1;
+        }
+
+        #[cfg(unix)]
+        if trash.exists() {
+            File::open(trash)
+                .and_then(|directory| directory.sync_all())
+                .map_err(|error| format!("Cannot flush Trash folder: {error}"))?;
+        }
     }
 
-    #[cfg(unix)]
-    File::open(trash)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|error| format!("Cannot flush Trash folder: {error}"))?;
+    Ok(removed)
+}
 
-    Ok(item_dirs.len())
+#[tauri::command]
+fn empty_universal_trash(
+    app: tauri::AppHandle,
+    origins: Vec<TrashOrigin>,
+    origin_id: Option<String>,
+) -> Result<usize, String> {
+    let mut partitions = Vec::new();
+    let mut visited = HashSet::new();
+    let mut matched_origin = origin_id.is_none();
+    for origin in origins {
+        if origin_id
+            .as_ref()
+            .is_some_and(|selected| selected != &origin.id)
+        {
+            continue;
+        }
+        matched_origin = true;
+        let (root, _) = trash_origin_root(&origin.path)?;
+        let trash = trash_library_dir(&app, &root)?;
+        if visited.insert(trash.clone()) {
+            partitions.push((trash.clone(), validated_trash_item_dirs(&trash)?));
+        }
+    }
+    if !matched_origin {
+        return Err("The selected Trash origin is no longer registered.".into());
+    }
+
+    remove_validated_trash_items(&partitions)
 }
 
 #[tauri::command]
@@ -713,12 +917,7 @@ fn restore_trash_item(
 }
 
 fn restore_trash_from(root: &Path, trash: &Path, trash_id: &str) -> Result<SheetSummary, String> {
-    Uuid::parse_str(trash_id).map_err(|_| "The Trash item identifier is invalid.".to_string())?;
-    let item_dir = trash.join(trash_id);
-    let metadata = fs::read(item_dir.join("metadata.json"))
-        .map_err(|error| format!("Cannot read Trash metadata: {error}"))?;
-    let item: TrashItem = serde_json::from_slice(&metadata)
-        .map_err(|error| format!("Cannot decode Trash metadata: {error}"))?;
+    let (item_dir, item, content) = read_trashed_sheet(trash, trash_id)?;
     let relative = validated_relative_markdown_path(&item.original_relative_path)?;
     let requested = root.join(&relative);
     let parent = requested
@@ -735,12 +934,86 @@ fn restore_trash_from(root: &Path, trash: &Path, trash_id: &str) -> Result<Sheet
         requested
     };
 
-    fs::copy(item_dir.join("sheet.md"), &target)
-        .map_err(|error| format!("Cannot restore sheet: {error}"))?;
-    sync_file_and_parent(&target)?;
+    create_verified_destination(&target, &content)?;
     fs::remove_dir_all(&item_dir)
         .map_err(|error| format!("Cannot remove restored Trash item: {error}"))?;
     summarize_existing(root, &target)
+}
+
+#[tauri::command]
+fn restore_universal_trash_item(
+    app: tauri::AppHandle,
+    origin: TrashOrigin,
+    trash_id: String,
+    restore_to_inbox: bool,
+) -> Result<TrashRestoreResult, String> {
+    let (origin_root, origin_available) = trash_origin_root(&origin.path)?;
+    let trash = trash_library_dir(&app, &origin_root)?;
+
+    if restore_to_inbox {
+        let inbox = inbox_library_dir(&app)?;
+        fs::create_dir_all(&inbox)
+            .map_err(|error| format!("Cannot create the Inbox folder: {error}"))?;
+        let inbox = fs::canonicalize(&inbox)
+            .map_err(|error| format!("Cannot open Inbox for restoration: {error}"))?;
+        let sheet = restore_trash_to_inbox_from(&inbox, &trash, &trash_id)?;
+        return Ok(TrashRestoreResult {
+            root: inbox.to_string_lossy().into_owned(),
+            restored_to_inbox: true,
+            sheet,
+        });
+    }
+
+    if !origin_available {
+        return Err(format!(
+            "{} is unavailable. Restore this sheet to Inbox instead.",
+            origin.name
+        ));
+    }
+    let sheet = restore_trash_from(&origin_root, &trash, &trash_id)?;
+    Ok(TrashRestoreResult {
+        root: origin_root.to_string_lossy().into_owned(),
+        restored_to_inbox: false,
+        sheet,
+    })
+}
+
+fn restore_trash_to_inbox_from(
+    inbox: &Path,
+    trash: &Path,
+    trash_id: &str,
+) -> Result<SheetSummary, String> {
+    let (item_dir, item, content) = read_trashed_sheet(trash, trash_id)?;
+    let original = validated_relative_markdown_path(&item.original_relative_path)?;
+    let stem = original
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("restored");
+    let target = unique_markdown_path(inbox, &format!("{stem}-restored"));
+    create_verified_destination(&target, &content)?;
+    fs::remove_dir_all(&item_dir)
+        .map_err(|error| format!("Cannot remove restored Trash item: {error}"))?;
+    summarize_existing(inbox, &target)
+}
+
+fn read_trashed_sheet(
+    trash: &Path,
+    trash_id: &str,
+) -> Result<(PathBuf, TrashItem, Vec<u8>), String> {
+    Uuid::parse_str(trash_id).map_err(|_| "The Trash item identifier is invalid.".to_string())?;
+    let item_dir = trash.join(trash_id);
+    let metadata = fs::read(item_dir.join("metadata.json"))
+        .map_err(|error| format!("Cannot read Trash metadata: {error}"))?;
+    let item: TrashItem = serde_json::from_slice(&metadata)
+        .map_err(|error| format!("Cannot decode Trash metadata: {error}"))?;
+    if item.id != trash_id {
+        return Err("Trash contains mismatched metadata; the sheet was not restored.".into());
+    }
+    let content = fs::read(item_dir.join("sheet.md"))
+        .map_err(|error| format!("Cannot read the trashed sheet: {error}"))?;
+    decode_markdown_bytes(&content)
+        .map_err(|_| "The trashed sheet is not a supported Markdown text file.".to_string())?;
+    Ok((item_dir, item, content))
 }
 
 #[tauri::command]
@@ -1050,6 +1323,19 @@ fn trash_library_dir(app: &tauri::AppHandle, root: &Path) -> Result<PathBuf, Str
         .map_err(|error| format!("Cannot locate application data: {error}"))?
         .join("trash")
         .join(key.as_str()))
+}
+
+fn inbox_library_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let documents = app
+        .path()
+        .document_dir()
+        .or_else(|_| app.path().home_dir().map(|home| home.join("Documents")))
+        .map_err(|error| format!("Cannot locate the Documents folder for Inbox: {error}"))?;
+    Ok(inbox_library_dir_from(&documents))
+}
+
+fn inbox_library_dir_from(documents: &Path) -> PathBuf {
+    documents.join("Writing Environment").join("Inbox")
 }
 
 fn search_index_path(app: &tauri::AppHandle, root: &Path) -> Result<PathBuf, String> {
@@ -1418,7 +1704,7 @@ fn decode_unicode_markdown_bytes(bytes: &[u8]) -> Result<MarkdownText, &'static 
 }
 
 fn decode_utf16(bytes: &[u8], little_endian: bool) -> Result<MarkdownText, &'static str> {
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return Err("UTF-16 Markdown has an incomplete code unit");
     }
     let units = bytes
@@ -1444,7 +1730,7 @@ fn decode_utf16(bytes: &[u8], little_endian: bool) -> Result<MarkdownText, &'sta
 }
 
 fn decode_utf32(bytes: &[u8], little_endian: bool) -> Result<MarkdownText, &'static str> {
-    if bytes.len() % 4 != 0 {
+    if !bytes.len().is_multiple_of(4) {
         return Err("UTF-32 Markdown has an incomplete code unit");
     }
     let mut content = String::new();
@@ -1467,7 +1753,7 @@ fn decode_utf32(bytes: &[u8], little_endian: bool) -> Result<MarkdownText, &'sta
 }
 
 fn likely_utf16_endianness(bytes: &[u8]) -> Option<bool> {
-    if bytes.len() < 4 || bytes.len() % 2 != 0 {
+    if bytes.len() < 4 || !bytes.len().is_multiple_of(2) {
         return None;
     }
     let pairs = bytes.len() / 2;
@@ -1706,6 +1992,8 @@ pub fn run() {
             presentation_uses_borderless_window,
             set_presentation_mode,
             open_library,
+            open_inbox,
+            ensure_project_identity,
             read_sheet,
             save_sheet,
             preserve_local_conflict,
@@ -1719,8 +2007,11 @@ pub fn run() {
             move_sheet_to_project,
             trash_sheet,
             list_trash,
+            list_universal_trash,
             empty_trash,
+            empty_universal_trash,
             restore_trash_item,
+            restore_universal_trash_item,
             search_library,
             project_watch::watch_library,
             project_watch::unwatch_library,
@@ -1781,6 +2072,45 @@ mod tests {
         assert_eq!(library.sheets[0].excerpt, "First paragraph.");
         assert_eq!(library.sheets[0].created_at, "2026-07-18T17:20:00+00:00");
         assert!(library.warnings.is_empty());
+    }
+
+    #[test]
+    fn project_identity_is_optional_stable_and_not_a_sheet() {
+        let root = tempfile::tempdir().expect("temporary library");
+        fs::write(root.path().join("one.md"), "# One\n\nA sheet.").expect("test sheet");
+        let preferred = Uuid::new_v4().to_string();
+
+        let identity =
+            ensure_project_identity_in(root.path(), &preferred).expect("create project identity");
+        assert_eq!(identity, preferred);
+        assert_eq!(read_project_identity(root.path()), Some(preferred.clone()));
+
+        let replacement = Uuid::new_v4().to_string();
+        assert_eq!(
+            ensure_project_identity_in(root.path(), &replacement)
+                .expect("preserve existing project identity"),
+            preferred
+        );
+
+        let library = open_library_unindexed(&root.path().to_string_lossy())
+            .expect("scan project with identity marker");
+        assert_eq!(library.project_id, Some(identity));
+        assert_eq!(library.sheets.len(), 1);
+        assert_eq!(library.sheets[0].relative_path, "one.md");
+    }
+
+    #[test]
+    fn invalid_project_identity_marker_remains_non_authoritative() {
+        let root = tempfile::tempdir().expect("temporary library");
+        fs::write(root.path().join(PROJECT_ID_MARKER), "not-a-project-id\n")
+            .expect("invalid marker");
+        fs::write(root.path().join("one.md"), "# One\n\nA sheet.").expect("test sheet");
+
+        let library = open_library_unindexed(&root.path().to_string_lossy())
+            .expect("open project despite invalid optional marker");
+        assert_eq!(library.project_id, None);
+        assert_eq!(library.sheets.len(), 1);
+        assert!(ensure_project_identity_in(root.path(), &Uuid::new_v4().to_string()).is_err());
     }
 
     #[test]
@@ -2088,6 +2418,28 @@ mod tests {
     }
 
     #[test]
+    fn inbox_is_an_ordinary_visible_documents_folder() {
+        let documents = Path::new("/home/writer/Documents");
+        assert_eq!(
+            inbox_library_dir_from(documents),
+            documents.join("Writing Environment").join("Inbox")
+        );
+    }
+
+    #[test]
+    fn verified_destination_never_overwrites_an_existing_file() {
+        let destination = tempfile::tempdir().expect("destination folder");
+        let target = destination.path().join("chapter.md");
+        fs::write(&target, "existing destination").expect("existing sheet");
+
+        assert!(create_verified_destination(&target, b"replacement").is_err());
+        assert_eq!(
+            fs::read_to_string(target).expect("existing destination remains"),
+            "existing destination"
+        );
+    }
+
+    #[test]
     fn sheet_moves_safely_between_open_project_folders() {
         let source_root = tempfile::tempdir().expect("source project");
         let destination_root = tempfile::tempdir().expect("destination project");
@@ -2135,6 +2487,78 @@ mod tests {
         assert!(list_trash_from(trash.path())
             .expect("empty trash")
             .is_empty());
+    }
+
+    #[test]
+    fn universal_trash_keeps_origin_identity_outside_markdown() {
+        let item = TrashItem {
+            id: Uuid::new_v4().to_string(),
+            title: "Lost Chapter".into(),
+            original_relative_path: "Draft/lost-chapter.md".into(),
+            trashed_at: "2026-07-26T12:00:00Z".into(),
+        };
+        let origin = TrashOrigin {
+            id: "project-1".into(),
+            name: "The Arrival".into(),
+            path: "/home/writer/The Arrival".into(),
+            kind: "project".into(),
+        };
+
+        let universal = universal_trash_item(item, &origin, false);
+        assert_eq!(universal.origin_id, "project-1");
+        assert_eq!(universal.origin_name, "The Arrival");
+        assert_eq!(universal.origin_path, "/home/writer/The Arrival");
+        assert!(!universal.origin_available);
+    }
+
+    #[test]
+    fn unavailable_origin_can_restore_safely_to_inbox() {
+        let root = tempfile::tempdir().expect("original project");
+        let trash = tempfile::tempdir().expect("origin trash");
+        let inbox = tempfile::tempdir().expect("Inbox");
+        let source = root.path().join("orphan.md");
+        fs::write(&source, "# Orphan\n\nRecovered intact.").expect("source sheet");
+        trash_sheet_into(root.path(), &source, trash.path()).expect("trash source");
+        let item = list_trash_from(trash.path())
+            .expect("list Trash")
+            .pop()
+            .expect("trashed item");
+
+        let restored = restore_trash_to_inbox_from(inbox.path(), trash.path(), &item.id)
+            .expect("restore to Inbox");
+        assert_eq!(restored.relative_path, "orphan-restored.md");
+        assert_eq!(
+            fs::read_to_string(inbox.path().join(restored.relative_path))
+                .expect("restored Inbox sheet"),
+            "# Orphan\n\nRecovered intact."
+        );
+        assert!(list_trash_from(trash.path())
+            .expect("empty origin Trash")
+            .is_empty());
+    }
+
+    #[test]
+    fn aggregate_empty_validates_every_origin_before_deleting_anything() {
+        let first_root = tempfile::tempdir().expect("first project");
+        let first_trash = tempfile::tempdir().expect("first Trash");
+        let first_sheet = first_root.path().join("first.md");
+        fs::write(&first_sheet, "# First").expect("first sheet");
+        trash_sheet_into(first_root.path(), &first_sheet, first_trash.path())
+            .expect("trash first sheet");
+
+        let invalid_trash = tempfile::tempdir().expect("invalid Trash");
+        fs::write(invalid_trash.path().join("unexpected"), "leave intact")
+            .expect("unexpected Trash entry");
+
+        let first_items = validated_trash_item_dirs(first_trash.path()).expect("valid first Trash");
+        assert!(validated_trash_item_dirs(invalid_trash.path()).is_err());
+        assert_eq!(first_items.len(), 1);
+        assert_eq!(
+            list_trash_from(first_trash.path())
+                .expect("first Trash remains")
+                .len(),
+            1
+        );
     }
 
     #[test]

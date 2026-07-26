@@ -59,10 +59,23 @@ Planned in staged, testable increments:
 1. [x] Make the unloaded desktop state genuinely empty and add safe project closing.
 2. [x] Add a persistent project registry and show real nested project folders.
    Open projects now remain in the sidebar while switching, remember their last sheets, and accept verified cross-project sheet moves.
-3. [ ] Add a universal Inbox with safe moves into projects.
-4. [ ] Aggregate origin-partitioned Trash into a universal recovery view.
-5. [ ] Replace per-project sync configuration in the interface with one universal remote root and per-project inclusion toggles, while retaining isolated sync jobs underneath.
-6. [ ] Migrate existing sync preferences without silently uploading or deleting files.
+3. [x] Add a universal Inbox with safe moves into projects.
+   Inbox is an ordinary visible Markdown folder under the user's Documents directory. It remains
+   available without an open project, supports editing, search, History, and external-file refresh,
+   and moves sheets into any open project through an atomic, byte-verified destination copy.
+4. [x] Aggregate origin-partitioned Trash into a universal recovery view.
+   Existing project and Inbox recovery partitions remain intact. The application adds their items
+   to one origin-labelled view, restores to the original location when available, offers Inbox as a
+   fallback when it is not, and can empty all origins or one selected origin after confirmation.
+5. [x] Replace per-project sync configuration in the interface with one universal remote root and per-location inclusion toggles, while retaining isolated sync jobs underneath.
+   Inbox and registered projects now derive deterministic destinations from one rclone remote root,
+   execute sequentially with separate profiles and deletion guards, and report aggregate status.
+   Every new destination requires an explicit first-sync confirmation and must be empty.
+6. [x] Migrate existing sync preferences without silently uploading or deleting files.
+   Existing initialized project profiles remain at their prior remote paths with automatic sync off.
+   A project moves into the universal layout only through an explicit action; its old remote folder
+   and recovery data are left untouched. A portable optional project UUID keeps the new destination
+   stable across computers without becoming a requirement for opening Markdown.
 
 See [Unified library model](unified-library.md) for the storage, recovery, and sync boundaries.
 

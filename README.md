@@ -14,17 +14,20 @@ The v0.1 desktop vertical slice and dedicated Raspberry Pi appliance image are c
 - focus mode and independently collapsible sidebars;
 - caret-aware paragraph and sentence writing focus, with an Off mode;
 - a dedicated Projects area with persistent recent projects and pinning;
+- a permanent Inbox of ordinary Markdown files for writing before choosing a project;
 - native Markdown-folder selection;
 - recursive Markdown discovery and metadata extraction;
 - sheet creation, rename, duplication, and folder moves;
-- recoverable Trash stored outside the selected project, with an explicit project-scoped Empty Trash action;
+- safe Inbox-to-project moves that atomically place and verify the destination before removing the source;
+- universal, origin-labelled Trash stored outside manuscripts, with original-location and Inbox-fallback restoration plus scoped Empty Trash confirmation;
 - full-text library search through a rebuildable, project-local SQLite FTS index, with direct Markdown scanning as a safe fallback;
 - coalesced native project-folder notifications for Markdown changes made by sync tools, file managers, or other editors;
 - guarded autosave that detects concurrent disk changes and offers to keep both versions instead of overwriting either one;
 - optional reopening of the last project and sheet at launch;
 - debounced local autosave using atomic file replacement;
-- optional provider-neutral two-way sync through rclone, including Dropbox remotes;
-- manual sync status plus opt-in automatic sync after saves and every five minutes;
+- optional provider-neutral universal two-way sync through rclone, including Dropbox remotes;
+- one remote root with Inbox/project inclusion controls, aggregate status, and isolated per-location safety profiles;
+- manual sync plus opt-in sequential automatic sync after saves and every five minutes;
 - empty-remote initialization, access checks, bounded deletion, and conflict-copy preservation;
 - recovery snapshots stored outside the selected library;
 - a sheet History browser with timestamped previews, word deltas, and reversible restore;
@@ -52,6 +55,8 @@ Version 0.4.2 turns rclone's excessive-deletion abort into a guided recovery sta
 
 Version 0.4.3 establishes **files over app** as a compatibility rule. Every readable Markdown file in an opened folder or any nested subfolder is a sheet, whether it was created by Writing Environment, Obsidian, another editor, or a cloud client. UTF-8 (with or without a byte-order mark), UTF-16, UTF-32, and Windows-1252 text are decoded; editing a legacy-encoded file safely normalizes it to UTF-8. macOS AppleDouble `._*.md` metadata is ignored rather than mistaken for prose. Reads retry briefly across cloud-client replacement boundaries, and sync can replace an unreadable local `.md` file with its valid remote counterpart only after preserving the original bytes in app recovery data.
 
+Version 0.4.4 completes the unified-library interface. Inbox is a permanent editable Markdown workspace, Trash aggregates recoverable sheets from Inbox and every registered project, and sheets can move safely between open projects. Sync now uses one universal rclone root with separate Inbox/project inclusion controls, sequential isolated jobs, aggregate status, explicit empty-destination initialization, and stable cross-device project identities. Existing project sync profiles remain at their previous remote locations with automatic sync disabled until the writer deliberately chooses how to proceed.
+
 Update artifacts and `latest.json` are published through [GitHub Releases](https://github.com/moonknight82/writing-environment/releases). Every application update is verified with Tauri's embedded public signing key before installation. The private key is held only in the repository's GitHub Actions secrets. macOS uses a signed Tauri application archive; Linux amd64 and Raspberry Pi use signed Debian packages and request system authorization when installation begins.
 
 Application updates do not modify Raspberry Pi OS, desktop settings, rclone configuration, projects, or recovery data. Appliance-level changes remain separate, deliberate updates or full-image releases.
@@ -60,7 +65,7 @@ The repeatable 10,000-sheet release benchmark currently measures an approximatel
 
 The plain browser build retains a safe prototype library and stores its sample draft in browser storage. Real folder access is enabled only inside the Tauri desktop application.
 
-Remote credentials are not stored by Writing Environment. Configure a provider once with `rclone config`, open a local project, and use the Sync control. The first sync accepts only an empty remote folder; automatic sync remains off until initialization succeeds.
+Remote credentials are not stored by Writing Environment. Configure a provider once with `rclone config`, then use Sync to choose one universal remote root and include Inbox or individual projects. Every new destination requires explicit confirmation and must be empty; automatic sync remains off until all included locations initialize successfully. Existing project sync settings are preserved at their old locations with automatic sync disabled, and are never moved merely by opening the new interface.
 
 History keeps the newest 30 pre-save versions for each sheet outside the synchronized project. Restoring a revision snapshots the current sheet first, so a restore can itself be undone.
 
@@ -153,7 +158,7 @@ Release bundles require the updater signing key through `TAURI_SIGNING_PRIVATE_K
 
 ## Publishing a release
 
-The public release workflow builds macOS Apple Silicon, Linux amd64, and Raspberry Pi ARM64 packages. To publish, update the version consistently in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`, commit it, then push the matching tag—for example `v0.4.3`. GitHub Actions tests, builds, signs, and publishes the packages and updater manifest. See [Release process](docs/releases.md) for signing-key recovery and release checks.
+The public release workflow builds macOS Apple Silicon, Linux amd64, and Raspberry Pi ARM64 packages. To publish, update the version consistently in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`, commit it, then push the matching tag—for example `v0.4.4`. GitHub Actions tests, builds, signs, and publishes the packages and updater manifest. See [Release process](docs/releases.md) for signing-key recovery and release checks.
 
 Native system spelling and grammar checking are enabled by default and can be changed in the Writer (`Aa`) panel. Linux builds initialize WebKitGTK with the bundled English (US) and Brazilian Portuguese Hunspell dictionaries; macOS builds enable WebKit's continuous spelling and grammar services. Writing Focus preserves the operating system's native underlines. Automatic correction remains off by default so the operating system cannot silently rewrite manuscript text unless the writer opts in.
 

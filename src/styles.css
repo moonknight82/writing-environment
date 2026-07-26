@@ -117,6 +117,22 @@ nav .eyebrow {
   padding: 0 10px;
 }
 
+.inbox-section {
+  padding: 12px 10px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.inbox-row {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.inbox-row:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 .projects-section {
   display: flex;
   min-height: 0;
@@ -316,6 +332,20 @@ nav .eyebrow {
   white-space: normal;
 }
 
+.trash-section {
+  padding: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.trash-row {
+  font-size: 12px;
+}
+
+.trash-row:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 .nav-row {
   display: grid;
   grid-template-columns: 20px 1fr auto;
@@ -425,6 +455,17 @@ main.workspace-empty .sheet-list > * {
   cursor: pointer;
   font-size: 9px;
   font-weight: 700;
+}
+
+.trash-origin-filter {
+  width: 96px;
+  min-height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  outline: 0;
+  color: var(--text-muted);
+  background: var(--surface);
+  font-size: 9px;
 }
 
 .empty-trash-button:hover:not(:disabled) {
@@ -563,6 +604,10 @@ main.workspace-empty .sheet-list > * {
   padding: 8px;
 }
 
+.sheets.trash-view {
+  height: calc(100% - 76px);
+}
+
 .empty-state {
   margin: 28px 18px;
   color: var(--text-muted);
@@ -693,6 +738,10 @@ main.workspace-empty .sheet-list > * {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.trash-card .trash-origin-warning {
+  color: #b45c55;
 }
 
 .trash-card button {
@@ -874,6 +923,10 @@ main.app-fullscreen .editor-toolbar {
   box-shadow: 0 14px 38px rgb(0 0 0 / 14%);
 }
 
+.universal-sync-menu {
+  width: min(390px, calc(100vw - 20px));
+}
+
 .sync-menu-heading {
   display: flex;
   align-items: center;
@@ -1014,6 +1067,114 @@ main.app-fullscreen .editor-toolbar {
   font-weight: 700;
 }
 
+.sync-secondary {
+  width: 100%;
+  min-height: 32px;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--accent);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.sync-secondary:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.sync-targets {
+  margin-top: 16px;
+  padding-top: 13px;
+  border-top: 1px solid var(--border);
+}
+
+.sync-targets > .eyebrow {
+  margin-bottom: 7px;
+}
+
+.sync-target {
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.sync-target + .sync-target {
+  margin-top: 6px;
+}
+
+.sync-target.legacy {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.sync-target.paused {
+  border-color: color-mix(in srgb, #b8823f 55%, var(--border));
+}
+
+.sync-target-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.sync-target-toggle span,
+.sync-target-toggle strong,
+.sync-target-toggle small {
+  display: block;
+  min-width: 0;
+}
+
+.sync-target-toggle strong {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sync-target-toggle small {
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sync-target-toggle input {
+  flex: 0 0 auto;
+}
+
+.sync-target-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 8px;
+}
+
+.sync-target-state button {
+  padding: 4px 6px;
+  border-radius: 5px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  cursor: pointer;
+  font-size: 8px;
+}
+
+.sync-target-state button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
 .sync-primary:disabled,
 .sync-field-row button:disabled,
 .sync-menu input:disabled,
@@ -1035,6 +1196,43 @@ main.app-fullscreen .editor-toolbar {
 
 .sync-menu code {
   font-size: 9px;
+}
+
+.sync-initialization-dialog {
+  width: min(100%, 460px);
+}
+
+.sync-initialization-list {
+  max-height: 210px;
+  margin-top: 12px;
+  overflow-y: auto;
+}
+
+.sync-initialization-list > div {
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+}
+
+.sync-initialization-list > div + div {
+  margin-top: 6px;
+}
+
+.sync-initialization-list strong,
+.sync-initialization-list small {
+  display: block;
+}
+
+.sync-initialization-list strong {
+  font-size: 10px;
+}
+
+.sync-initialization-list small {
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: 8px;
 }
 
 @keyframes sync-pulse {

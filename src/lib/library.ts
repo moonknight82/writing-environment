@@ -13,6 +13,7 @@ export interface SheetSummary {
 export interface LibrarySnapshot {
   name: string;
   path: string;
+  projectId: string | null;
   sheets: SheetSummary[];
   warnings: string[];
 }
@@ -22,6 +23,27 @@ export interface TrashItem {
   title: string;
   originalRelativePath: string;
   trashedAt: string;
+}
+
+export interface TrashOrigin {
+  id: string;
+  name: string;
+  path: string;
+  kind: "inbox" | "project";
+}
+
+export interface UniversalTrashItem extends TrashItem {
+  originId: string;
+  originName: string;
+  originPath: string;
+  originKind: "inbox" | "project";
+  originAvailable: boolean;
+}
+
+export interface TrashRestoreResult {
+  root: string;
+  restoredToInbox: boolean;
+  sheet: SheetSummary;
 }
 
 export interface RevisionSummary {
@@ -51,6 +73,14 @@ export async function chooseLibrary(): Promise<LibrarySnapshot | null> {
 
 export function openLibraryPath(path: string): Promise<LibrarySnapshot> {
   return invoke<LibrarySnapshot>("open_library", { path });
+}
+
+export function openInbox(): Promise<LibrarySnapshot> {
+  return invoke<LibrarySnapshot>("open_inbox");
+}
+
+export function ensureProjectIdentity(root: string, preferredId: string): Promise<string> {
+  return invoke<string>("ensure_project_identity", { root, preferredId });
 }
 
 export function readLibrarySheet(root: string, relativePath: string): Promise<string> {
@@ -155,12 +185,35 @@ export function listLibraryTrash(root: string): Promise<TrashItem[]> {
   return invoke<TrashItem[]>("list_trash", { root });
 }
 
+export function listUniversalTrash(origins: TrashOrigin[]): Promise<UniversalTrashItem[]> {
+  return invoke<UniversalTrashItem[]>("list_universal_trash", { origins });
+}
+
 export function emptyLibraryTrash(root: string): Promise<number> {
   return invoke<number>("empty_trash", { root });
 }
 
+export function emptyUniversalTrash(
+  origins: TrashOrigin[],
+  originId: string | null,
+): Promise<number> {
+  return invoke<number>("empty_universal_trash", { origins, originId });
+}
+
 export function restoreLibraryTrash(root: string, trashId: string): Promise<SheetSummary> {
   return invoke<SheetSummary>("restore_trash_item", { root, trashId });
+}
+
+export function restoreUniversalTrash(
+  origin: TrashOrigin,
+  trashId: string,
+  restoreToInbox: boolean,
+): Promise<TrashRestoreResult> {
+  return invoke<TrashRestoreResult>("restore_universal_trash_item", {
+    origin,
+    trashId,
+    restoreToInbox,
+  });
 }
 
 export function searchLibrary(root: string, query: string): Promise<SheetSummary[]> {

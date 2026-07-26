@@ -1,6 +1,8 @@
-Establishes files over app as the compatibility rule: every readable Markdown file in an opened folder or nested subfolder is detected without requiring Writing Environment metadata. Files from Obsidian and other editors can use UTF-8, UTF-16, UTF-32, or Windows-1252; legacy text becomes UTF-8 only after the writer edits it.
+Completes the unified-library interface. Inbox is now a permanent editable Markdown workspace, and Trash presents recoverable sheets from Inbox and every registered project in one origin-labelled view. Sheets can be restored to their original project or safely recovered to Inbox when that project is unavailable.
 
-macOS AppleDouble sidecars are ignored, cloud-client writes receive a bounded read retry, and an unreadable Pi-side Markdown file can be restored from its valid remote counterpart only after the exact local bytes are preserved in recovery data. This addresses valid Mac/Dropbox edits becoming unavailable on the Pi without silently discarding the problematic local copy.
+Sync now uses one universal rclone remote root with separate inclusion controls for Inbox and each project. Locations run sequentially with isolated state, archives, conflict handling, and deletion protection. Every new remote destination requires explicit confirmation and must be empty. A small optional project UUID keeps its destination stable across Mac, Linux, and Raspberry Pi without becoming a requirement for opening Markdown.
+
+Existing project sync settings are preserved at their original remote paths with automatic sync disabled. Installing this release does not silently upload, relocate, or delete project files. Moving a legacy project into the universal layout remains an explicit, separately confirmed action.
 
 Signed desktop release for macOS Apple Silicon, Linux amd64, and Raspberry Pi ARM64.
 
