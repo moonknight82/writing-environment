@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { afterUpdate, onDestroy, onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { getVersion } from "@tauri-apps/api/app";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
@@ -63,11 +63,6 @@
 
   type WritingFocusMode = "off" | "paragraph" | "sentence";
   type SheetSort = "created-desc" | "created-asc" | "title-asc" | "title-desc";
-
-  interface FocusSegment {
-    text: string;
-    active: boolean;
-  }
 
   type SheetDialogMode = "create" | "rename" | "move" | "trash";
 
@@ -217,15 +212,24 @@ It passed the abandoned signal house before descending between black pines to th
   let automaticCorrection = false;
   let writingFocusMode: WritingFocusMode = "off";
   let cursorPosition = 0;
-  let focusSegments: FocusSegment[] = [];
   let editorTextarea: HTMLTextAreaElement;
   let focusOverlay: HTMLPreElement;
+  let focusBefore: HTMLSpanElement;
+  let focusActive: HTMLSpanElement;
+  let focusAfter: HTMLSpanElement;
+  let focusOverlayFrame: number | undefined;
+  let focusScrollbarWidth: number | null = null;
+  let renderedFocusBefore = "";
+  let renderedFocusActive = "";
+  let renderedFocusAfter = "";
   let sessionGoal = 500;
   let sessionGoalDraft = 500;
   let sessionWords = 0;
   const sessionBaselines = new Map<string, number>();
   const sessionCounts = new Map<string, number>();
   let content = desktopMode ? "" : initialText;
+  let currentWordCount = wordCount(content);
+  let typingMetricsTimer: ReturnType<typeof setTimeout> | undefined;
   let persistedContent = content;
   let saveStatus = desktopMode ? "No sheet open" : "Saved locally";
   let libraryName = desktopMode ? "No project open" : "Prototype Library";
@@ -311,7 +315,7 @@ It passed the abandoned signal house before descending between black pines to th
   let externalConflictPath: string | null = null;
   let externalDiskContent: string | null = null;
   let resolvingExternalConflict = false;
-  let appVersion = "0.4.4";
+  let appVersion = "0.4.5";
   let automaticUpdateChecks = true;
   let updateVisible = false;
   let updateChecking = false;
@@ -342,16 +346,12 @@ It passed the abandoned signal house before descending between black pines to th
   $: filteredTrashItems = trashOriginFilter === "all"
     ? trashItems
     : trashItems.filter((item) => item.originId === trashOriginFilter);
-  $: focusSegments = buildFocusSegments(content, cursorPosition, writingFocusMode);
+  $: scheduleFocusOverlayRefresh(content, cursorPosition, writingFocusMode);
   $: universalSyncTargets = buildUniversalSyncTargets();
   $: syncNeedsInitialization = universalSyncTargets.some(
     (target) => target.included && !target.initialized,
   );
   $: selectedRevision = historyRevisions.find((revision) => revision.id === selectedRevisionId);
-
-  afterUpdate(() => {
-    if (writingFocusMode !== "off") syncFocusOverlay(editorTextarea);
-  });
 
   onMount(() => {
     const savedTheme = localStorage.getItem("writing-environment.theme");
@@ -428,6 +428,8 @@ It passed the abandoned signal house before descending between black pines to th
     if (syncInterval) clearInterval(syncInterval);
     if (libraryRefreshTimer) clearTimeout(libraryRefreshTimer);
     if (updateCheckTimer) clearTimeout(updateCheckTimer);
+    if (typingMetricsTimer) clearTimeout(typingMetricsTimer);
+    if (focusOverlayFrame !== undefined) cancelAnimationFrame(focusOverlayFrame);
     windowStateUnlisten?.();
     libraryChangeUnlisten?.();
     if (desktopAvailable()) void unwatchLibrary();
@@ -664,6 +666,7 @@ It passed the abandoned signal house before descending between black pines to th
     const writtenThisSession = Math.max(0, previousCount - previousBaseline);
     sessionCounts.set(key, count);
     sessionBaselines.set(key, count - writtenThisSession);
+    currentWordCount = count;
     recomputeSessionWords();
   }
 
@@ -730,6 +733,7 @@ It passed the abandoned signal house before descending between black pines to th
     activeSheet = "No Markdown sheets";
     activeSheetPath = null;
     content = "";
+    currentWordCount = 0;
     persistedContent = "";
     dirty = false;
     clearExternalConflict();
@@ -794,18 +798,21 @@ It passed the abandoned signal house before descending between black pines to th
     lineHeight = Math.min(2.2, Math.max(1.35, Math.round(value * 100) / 100));
     document.documentElement.style.setProperty("--prose-line-height", String(lineHeight));
     localStorage.setItem("writing-environment.line-height", String(lineHeight));
+    scheduleFocusOverlayGeometryRefresh();
   }
 
   function setEditorTextSize(value: number): void {
     editorTextSize = Math.min(32, Math.max(14, Math.round(value)));
     document.documentElement.style.setProperty("--editor-text-size", `${editorTextSize}px`);
     localStorage.setItem("writing-environment.editor-text-size", String(editorTextSize));
+    scheduleFocusOverlayGeometryRefresh();
   }
 
   function setWriterWidth(value: number): void {
     writerWidth = Math.min(100, Math.max(50, Math.round(value)));
     document.documentElement.style.setProperty("--writer-width", `${writerWidth}%`);
     localStorage.setItem("writing-environment.writer-width", String(writerWidth));
+    scheduleFocusOverlayGeometryRefresh();
   }
 
   function prototypeDraftStorageKey(relativePath: string): string {
@@ -851,7 +858,7 @@ It passed the abandoned signal house before descending between black pines to th
     writingFocusMode = mode;
     localStorage.setItem("writing-environment.writing-focus", mode);
     focusMenuVisible = false;
-    requestAnimationFrame(() => syncFocusOverlay(editorTextarea));
+    scheduleFocusOverlayGeometryRefresh();
   }
 
   function setSessionGoal(value: number): void {
@@ -874,21 +881,93 @@ It passed the abandoned signal house before descending between black pines to th
   function handleEditorInput(target: HTMLTextAreaElement): void {
     content = target.value;
     updateCursor(target);
-    updateSessionCount();
+    scheduleTypingMetrics();
     handleInput();
   }
 
   function updateCursor(target: HTMLTextAreaElement = editorTextarea): void {
     if (!target) return;
-    cursorPosition = target.selectionStart;
+    const nextPosition = target.selectionStart;
+    if (nextPosition !== cursorPosition) cursorPosition = nextPosition;
   }
 
-  function syncFocusOverlay(target: HTMLTextAreaElement): void {
+  function syncFocusOverlay(target: HTMLTextAreaElement, measure = false): void {
     if (!target || !focusOverlay) return;
-    const scrollbarWidth = Math.max(0, target.offsetWidth - target.clientWidth);
-    focusOverlay.style.setProperty("--editor-scrollbar-width", `${scrollbarWidth}px`);
+    if (measure || focusScrollbarWidth === null) {
+      focusScrollbarWidth = Math.max(0, target.offsetWidth - target.clientWidth);
+      focusOverlay.style.setProperty(
+        "--editor-scrollbar-width",
+        `${focusScrollbarWidth}px`,
+      );
+    }
     focusOverlay.scrollTop = target.scrollTop;
     focusOverlay.scrollLeft = target.scrollLeft;
+  }
+
+  function scheduleFocusOverlayGeometryRefresh(): void {
+    focusScrollbarWidth = null;
+    scheduleFocusOverlayRefresh(content, cursorPosition, writingFocusMode);
+  }
+
+  function scheduleFocusOverlayRefresh(
+    _text: string,
+    _position: number,
+    mode: WritingFocusMode,
+  ): void {
+    if (mode === "off") {
+      if (focusOverlayFrame !== undefined) cancelAnimationFrame(focusOverlayFrame);
+      focusOverlayFrame = undefined;
+      return;
+    }
+    if (focusOverlayFrame !== undefined) return;
+    focusOverlayFrame = requestAnimationFrame(() => {
+      focusOverlayFrame = undefined;
+      renderFocusOverlay();
+    });
+  }
+
+  function renderFocusOverlay(): void {
+    if (
+      writingFocusMode === "off"
+      || !editorTextarea
+      || !focusOverlay
+      || !focusBefore
+      || !focusActive
+      || !focusAfter
+    ) return;
+
+    const range = focusRange(content, cursorPosition, writingFocusMode);
+    const before = content.slice(0, range.start);
+    const active = content.slice(range.start, range.end) || " ";
+    const after = content.slice(range.end);
+    if (before !== renderedFocusBefore) {
+      focusBefore.textContent = before;
+      renderedFocusBefore = before;
+    }
+    if (active !== renderedFocusActive) {
+      focusActive.textContent = active;
+      renderedFocusActive = active;
+    }
+    if (after !== renderedFocusAfter) {
+      focusAfter.textContent = after;
+      renderedFocusAfter = after;
+    }
+    syncFocusOverlay(editorTextarea, focusScrollbarWidth === null);
+  }
+
+  function scheduleTypingMetrics(): void {
+    if (typingMetricsTimer) clearTimeout(typingMetricsTimer);
+    typingMetricsTimer = setTimeout(() => {
+      flushTypingMetrics();
+    }, 140);
+  }
+
+  function flushTypingMetrics(): void {
+    if (typingMetricsTimer) clearTimeout(typingMetricsTimer);
+    typingMetricsTimer = undefined;
+    const count = wordCount(content);
+    currentWordCount = count;
+    updateSessionCount(count);
   }
 
   function handleInput(): void {
@@ -918,6 +997,7 @@ It passed the abandoned signal house before descending between black pines to th
   async function performCurrentSheetSave(): Promise<boolean> {
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = undefined;
+    flushTypingMetrics();
     const versionBeingSaved = content;
     const projectBeingSaved = libraryPath;
     const sheetBeingSaved = activeSheetPath;
@@ -1186,6 +1266,7 @@ It passed the abandoned signal house before descending between black pines to th
     searchQuery = "";
     searchResults = [];
     content = "";
+    currentWordCount = 0;
     persistedContent = "";
     cursorPosition = 0;
     dirty = false;
@@ -1927,6 +2008,7 @@ It passed the abandoned signal house before descending between black pines to th
       await reloadLibrary(sheetPath, true);
       const key = sessionSheetKey();
       const restoredWords = wordCount(content);
+      currentWordCount = restoredWords;
       sessionBaselines.set(key, restoredWords);
       sessionCounts.set(key, restoredWords);
       recomputeSessionWords();
@@ -2551,17 +2633,20 @@ It passed the abandoned signal house before descending between black pines to th
   }
 
   function registerSessionSheet(): void {
+    if (typingMetricsTimer) clearTimeout(typingMetricsTimer);
+    typingMetricsTimer = undefined;
     const key = sessionSheetKey();
     const count = wordCount(content);
+    currentWordCount = count;
     if (!sessionBaselines.has(key)) sessionBaselines.set(key, count);
     sessionCounts.set(key, count);
     recomputeSessionWords();
   }
 
-  function updateSessionCount(): void {
+  function updateSessionCount(count: number): void {
     const key = sessionSheetKey();
-    if (!sessionBaselines.has(key)) sessionBaselines.set(key, wordCount(content));
-    sessionCounts.set(key, wordCount(content));
+    if (!sessionBaselines.has(key)) sessionBaselines.set(key, count);
+    sessionCounts.set(key, count);
     recomputeSessionWords();
   }
 
@@ -2576,37 +2661,40 @@ It passed the abandoned signal house before descending between black pines to th
     return value === "off" || value === "paragraph" || value === "sentence";
   }
 
-  function buildFocusSegments(
+  function focusRange(
     text: string,
     position: number,
     mode: WritingFocusMode,
-  ): FocusSegment[] {
-    if (!text) return [{ text: " ", active: true }];
-    if (mode === "off") return [{ text, active: true }];
+  ): { start: number; end: number } {
+    if (!text || mode === "off") return { start: 0, end: text.length };
 
     const paragraph = paragraphRange(text, position);
-    const activeRange = mode === "sentence" ? sentenceRange(text, position, paragraph) : paragraph;
-    const segments: FocusSegment[] = [];
-
-    if (activeRange.start > 0) segments.push({ text: text.slice(0, activeRange.start), active: false });
-    segments.push({ text: text.slice(activeRange.start, activeRange.end), active: true });
-    if (activeRange.end < text.length) {
-      segments.push({ text: text.slice(activeRange.end), active: false });
-    }
-
-    return segments;
+    return mode === "sentence" ? sentenceRange(text, position, paragraph) : paragraph;
   }
 
   function paragraphRange(text: string, position: number): { start: number; end: number } {
     const cursor = Math.min(text.length, Math.max(0, position));
-    const before = text.slice(0, cursor);
-    const separators = Array.from(before.matchAll(/\n\s*\n/g));
-    const lastSeparator = separators.at(-1);
-    const start = lastSeparator?.index === undefined
-      ? 0
-      : lastSeparator.index + lastSeparator[0].length;
-    const nextSeparator = /\n\s*\n/.exec(text.slice(cursor));
-    const end = nextSeparator?.index === undefined ? text.length : cursor + nextSeparator.index;
+    let start = 0;
+    for (let index = cursor - 1; index >= 0; index -= 1) {
+      if (text[index] !== "\n") continue;
+      let previous = index - 1;
+      while (previous >= 0 && /[\t \r]/.test(text[previous])) previous -= 1;
+      if (previous >= 0 && text[previous] === "\n") {
+        start = index + 1;
+        break;
+      }
+    }
+
+    let end = text.length;
+    for (let index = cursor; index < text.length; index += 1) {
+      if (text[index] !== "\n") continue;
+      let next = index + 1;
+      while (next < text.length && /[\t \r]/.test(text[next])) next += 1;
+      if (next < text.length && text[next] === "\n") {
+        end = index;
+        break;
+      }
+    }
     return { start, end: Math.max(start, end) };
   }
 
@@ -2635,7 +2723,11 @@ It passed the abandoned signal house before descending between black pines to th
   <title>{activeSheet} — Writing Environment</title>
 </svelte:head>
 
-<svelte:window onkeydown={handleWindowKeydown} onclick={handleWindowClick} />
+<svelte:window
+  onkeydown={handleWindowKeydown}
+  onclick={handleWindowClick}
+  onresize={scheduleFocusOverlayGeometryRefresh}
+/>
 
 <main
   class:library-hidden={!libraryVisible}
@@ -3458,11 +3550,11 @@ It passed the abandoned signal house before descending between black pines to th
       {:else}
       <div class="editor-stage">
         {#if writingFocusMode !== "off"}
-          <pre class="focus-overlay" aria-hidden="true" bind:this={focusOverlay}>{#each focusSegments as segment}<span class:active={segment.active}>{segment.text}</span>{/each}</pre>
+          <pre class="focus-overlay" aria-hidden="true" bind:this={focusOverlay}><span bind:this={focusBefore}></span><span class="active" bind:this={focusActive}></span><span bind:this={focusAfter}></span></pre>
         {/if}
       <textarea
         bind:this={editorTextarea}
-        bind:value={content}
+        value={content}
         class:focus-enabled={writingFocusMode !== "off"}
         aria-label="Markdown manuscript"
         autocapitalize="off"
@@ -3494,7 +3586,7 @@ It passed the abandoned signal house before descending between black pines to th
             <span>{sessionWords.toLocaleString()} / {sessionGoal.toLocaleString()} session</span>
           </div>
         {/if}
-        <span>{wordCount(content).toLocaleString()} words</span>
+        <span>{currentWordCount.toLocaleString()} words</span>
       </div>
     </footer>
   </section>

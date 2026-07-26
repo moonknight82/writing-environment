@@ -27,6 +27,13 @@ Tauri command boundary
 
 The interface never treats its in-memory editor state or SQLite as the authoritative manuscript. The persistence service owns file writes and reports whether content is dirty, saved locally, or synchronized remotely.
 
+The editor keeps the keystroke path separate from whole-document metrics. Input updates the native
+textarea and schedules autosave immediately, while word/session counts are coalesced after a short
+typing pause. Writing Focus uses three persistent overlay text nodes (before, active, and after),
+scans only the current paragraph for its boundary, and refreshes at most once per animation frame.
+Scrollbar geometry is remeasured only when layout settings or the window size change, not after
+every character.
+
 The desktop application maintains a rebuildable SQLite FTS index under its application-data directory, isolated by canonical project path. Project opening reconciles file modification metadata incrementally, saved sheets update only their own index entry, and search reads from FTS. A missing, incompatible, or corrupt index is rebuilt from Markdown; if indexing remains unavailable, the application falls back to bounded direct scans. SQLite is always derived state and never becomes authoritative manuscript storage.
 
 Each open desktop project also has one native recursive filesystem watcher. Markdown and group-folder events are coalesced after a quiet period before the index and visible library are reconciled. Unrelated assets and hidden synchronization markers do not trigger refresh work. An externally changed active sheet is reread only when the editor is clean. If the editor is dirty, autosave compares against the exact last-known disk contents and stops on a mismatch; the writer can then keep the disk version and preserve the local draft as a separate conflict sheet.

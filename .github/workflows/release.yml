@@ -114,11 +114,11 @@ jobs:
         with:
           releaseId: ${{ needs.prepare-release.outputs.release_id }}
           releaseBody: |
-            Completes the unified-library interface. Inbox is now a permanent editable Markdown workspace, and Trash presents recoverable sheets from Inbox and every registered project in one origin-labelled view. Sheets can be restored to their original project or safely recovered to Inbox when that project is unavailable.
+            Makes ordinary typing responsive again on macOS, Linux amd64, and Raspberry Pi. Word and session counts no longer rescan and split the complete manuscript on every character; they update after a short typing pause without changing autosave timing.
 
-            Sync now uses one universal rclone remote root with separate inclusion controls for Inbox and each project. Locations run sequentially with isolated state, archives, conflict handling, and deletion protection. Every new remote destination requires explicit confirmation and must be empty. A small optional project UUID keeps its destination stable across Mac, Linux, and Raspberry Pi without becoming a requirement for opening Markdown.
+            Writing Focus now keeps three persistent overlay regions instead of rebuilding the complete overlay after every Svelte update. Paragraph boundaries are found by scanning the active paragraph rather than all preceding text, visual refreshes are limited to one per animation frame, and scrollbar geometry is measured only after a real layout change.
 
-            Existing project sync settings are preserved at their original remote paths with automatic sync disabled. Installing this release does not silently upload, relocate, or delete project files. Moving a legacy project into the universal layout remains an explicit, separately confirmed action.
+            Autosave, external-change protection, universal sync, Inbox, and Trash behavior are unchanged from 0.4.4.
 
             Signed desktop release for macOS Apple Silicon, Linux amd64, and Raspberry Pi ARM64.
 

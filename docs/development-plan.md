@@ -28,6 +28,7 @@ Current work:
 - [x] Enforce files-over-app interoperability: recursively open metadata-free Markdown from other editors, decode common text encodings, ignore macOS metadata sidecars, and preserve unreadable local bytes before remote repair.
 - [x] Guard autosave with the last known disk version and preserve local edits as a visible conflict copy when both versions change.
 - [x] Expand interrupted-write and synchronization-conflict durability tests, including pre-rename interruption, permission preservation, keep-both conflict copies, isolated sync profiles, access-marker preservation, and complete rclone safety arguments.
+- [x] Remove whole-document word counting, focus-overlay reconstruction, and repeated layout measurement from the keystroke path.
 
 Release criteria:
 
