@@ -9,7 +9,7 @@
 5. Add conservative bidirectional synchronization. (Completed for the current application.)
 6. Package the proven application in a minimal Labwc-based Raspberry Pi OS image. (Completed.)
 7. Add a rebuildable SQLite FTS index and validate 10,000-sheet libraries on the 2 GB Raspberry Pi. (Current milestone.)
-8. Add portable DOCX and PDF export without changing Markdown's role as the authoritative manuscript format.
+8. Add portable DOCX, PDF, and EPUB export without changing Markdown's role as the authoritative manuscript format.
 
 ## Application boundaries
 
@@ -59,6 +59,8 @@ a collision-safe name. Permanent deletion validates the complete selected set of
 removing any item.
 
 Markdown files are authoritative; the application database is only a rebuildable search index. Opening a project recursively discovers readable `.md` files without requiring Writing Environment frontmatter or IDs. The shared reader accepts UTF-8, UTF-16, UTF-32, and Windows-1252 text and normalizes legacy encodings to UTF-8 only when the writer saves an edit. Known non-document artifacts such as macOS AppleDouble `._*.md` files are ignored. A bounded retry handles cloud clients that briefly expose an incomplete multibyte write.
+
+Document export is a one-way product boundary. The frontend obtains an explicit destination from the native Save dialog and sends the current in-memory sheet to a background Rust worker. One CommonMark event parser strips YAML front matter and produces a small shared manuscript structure. DOCX maps that structure into named WordprocessingML styles; PDF lays it out deterministically on Letter pages with locally embedded Source Serif 4 faces; EPUB maps it to a self-contained EPUB 3 package with reflowable XHTML, navigation, metadata, and CSS. Every exporter writes to a temporary file beside the destination, flushes it, and atomically replaces the selected file. Export never reads back into, annotates, or otherwise changes the Markdown source. The first slice exports one sheet; folder/project assembly, title-page options, images, and tables remain later stages of the same model.
 
 ## Synchronization boundary
 

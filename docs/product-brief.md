@@ -37,6 +37,7 @@ The application must be tested on that device before a feature is considered com
 - Persistent writer line-height control
 - Persistent session word goal with live progress
 - Visible local-save and synchronization state
+- Current-sheet DOCX, PDF, and EPUB export with predictable manuscript structure
 
 ## Performance budgets
 
@@ -61,7 +62,7 @@ These are engineering targets and may be tightened after measurement on the phys
 
 ## Deferred work
 
-- DOCX, PDF, and EPUB export
+- Folder/project document assembly and export options
 - Plugin marketplace
 - Collaboration
 - Mobile applications

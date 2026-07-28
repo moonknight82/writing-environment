@@ -83,11 +83,13 @@ See [Unified library model](unified-library.md) for the storage, recovery, and s
 
 ## v0.5 — Export
 
-Planned after the unified library is stable:
+Current work:
 
-1. DOCX export with a small set of predictable manuscript styles.
-2. Print-ready PDF export using the same style model.
-3. EPUB export after headings, scene breaks, metadata, and asset handling are defined.
+1. [x] Export the current in-memory sheet to DOCX through a native Save dialog, using a small set of predictable manuscript styles and an atomic destination write.
+2. [ ] Assemble a folder or complete project into one ordered DOCX, PDF, or EPUB without introducing proprietary manuscript metadata.
+3. [ ] Add a small export panel for manuscript profile, title-page, and section-break choices.
+4. [x] Export a print-ready Letter PDF using the same parsed document and style model, embedded Unicode fonts, and deterministic pagination.
+5. [x] Export a valid EPUB 3 publication with reflowable XHTML, metadata, navigation, and local CSS.
 
 Exported files are products of Markdown projects. They do not replace or modify the source manuscripts.
 

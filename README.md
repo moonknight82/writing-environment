@@ -8,7 +8,7 @@ The application is portable across Raspberry Pi, Linux amd64, and macOS. Its ded
 
 ## Current milestone
 
-The v0.1 desktop vertical slice and dedicated Raspberry Pi appliance image are complete. Version 0.2 established large-library performance and reliability; v0.3 adds signed application updates and reproducible public releases. The repository contains:
+The v0.1 desktop vertical slice and dedicated Raspberry Pi appliance image are complete. Version 0.2 established large-library performance and reliability, v0.3 added signed application updates, v0.4 unified Inbox and project workflows, and v0.5 begins portable document export. The repository contains:
 
 - three-pane library, sheet, and editor layout;
 - focus mode and independently collapsible sidebars;
@@ -31,6 +31,7 @@ The v0.1 desktop vertical slice and dedicated Raspberry Pi appliance image are c
 - empty-remote initialization, access checks, bounded deletion, and conflict-copy preservation;
 - recovery snapshots stored outside the selected library;
 - a sheet History browser with timestamped previews, word deltas, and reversible restore;
+- current-sheet DOCX, PDF, and EPUB export through a native Save dialog, using one predictable manuscript structure;
 - path-traversal protection and preserved file permissions;
 - persistent editor text-size, line-height, and sheet-width controls;
 - native system spell checking with optional automatic correction;
@@ -61,6 +62,8 @@ Version 0.4.5 removes whole-document work from the editor's keystroke path. Word
 
 Version 0.4.6 moves native autosave persistence off the interactive application thread. History snapshots, atomic file replacement, and search-index maintenance run on a blocking worker after 1.2 seconds of typing inactivity. Filesystem notifications caused by the app's own save are coalesced until editing and saving are idle, while external-change and disk-conflict protection remain active.
 
+Version 0.5.0 adds one-way document export for the current in-memory sheet. The Export menu creates editable DOCX, fixed-layout Letter PDF, or standards-compliant reflowable EPUB files without saving formatting back into Markdown. PDF uses locally bundled Source Serif 4 fonts; EPUB packages self-contained XHTML, navigation, metadata, and CSS. All three formats omit YAML front matter, avoid duplicating a matching opening title, and write atomically beside the chosen destination.
+
 Update artifacts and `latest.json` are published through [GitHub Releases](https://github.com/moonknight82/writing-environment/releases). Every application update is verified with Tauri's embedded public signing key before installation. The private key is held only in the repository's GitHub Actions secrets. macOS uses a signed Tauri application archive; Linux amd64 and Raspberry Pi use signed Debian packages and request system authorization when installation begins.
 
 Application updates do not modify Raspberry Pi OS, desktop settings, rclone configuration, projects, or recovery data. Appliance-level changes remain separate, deliberate updates or full-image releases.
@@ -72,6 +75,10 @@ The plain browser build retains a safe prototype library and stores its sample d
 Remote credentials are not stored by Writing Environment. Configure a provider once with `rclone config`, then use Sync to choose one universal remote root and include Inbox or individual projects. Every new destination requires explicit confirmation and must be empty; automatic sync remains off until all included locations initialize successfully. Existing project sync settings are preserved at their old locations with automatic sync disabled, and are never moved merely by opening the new interface.
 
 History keeps the newest 30 pre-save versions for each sheet outside the synchronized project. Restoring a revision snapshots the current sheet first, so a restore can itself be undone.
+
+The editor toolbar's **Export** menu writes the current in-memory sheet as DOCX, PDF, or EPUB without changing its Markdown source. DOCX and PDF use a Letter manuscript profile with one-inch margins, 12 pt double-spaced body paragraphs, half-inch first-line indents, and dedicated treatments for titles, headings, quotations, lists, code, and scene breaks. EPUB uses the same parsed structure in reflowable XHTML with local CSS, metadata, and navigation. YAML front matter is omitted, and a leading `#` heading that matches the sheet title is not duplicated. Export writes through a temporary file and atomically replaces the chosen destination. This slice does not yet assemble folders or complete projects, embed images, or model Markdown tables.
+
+PDF export embeds [Source Serif 4](https://github.com/adobe-fonts/source-serif), distributed under the SIL Open Font License 1.1. The bundled license is kept in `src-tauri/assets/fonts/LICENSE.md`.
 
 ## Run the prototype
 
@@ -162,7 +169,7 @@ Release bundles require the updater signing key through `TAURI_SIGNING_PRIVATE_K
 
 ## Publishing a release
 
-The public release workflow builds macOS Apple Silicon, Linux amd64, and Raspberry Pi ARM64 packages. To publish, update the version consistently in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`, commit it, then push the matching tag—for example `v0.4.6`. GitHub Actions tests, builds, signs, and publishes the packages and updater manifest. See [Release process](docs/releases.md) for signing-key recovery and release checks.
+The public release workflow builds macOS Apple Silicon, Linux amd64, and Raspberry Pi ARM64 packages. To publish, update the version consistently in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`, commit it, then push the matching tag—for example `v0.5.0`. GitHub Actions tests, builds, signs, and publishes the packages and updater manifest. See [Release process](docs/releases.md) for signing-key recovery and release checks.
 
 Native system spelling and grammar checking are enabled by default and can be changed in the Writer (`Aa`) panel. Linux builds initialize WebKitGTK with the bundled English (US) and Brazilian Portuguese Hunspell dictionaries; macOS builds enable WebKit's continuous spelling and grammar services. Writing Focus preserves the operating system's native underlines. Automatic correction remains off by default so the operating system cannot silently rewrite manuscript text unless the writer opts in.
 

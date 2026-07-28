@@ -9,6 +9,7 @@ use tempfile::NamedTempFile;
 use uuid::Uuid;
 use walkdir::WalkDir;
 
+mod document_export;
 mod project_watch;
 mod search_index;
 mod sync;
@@ -353,6 +354,33 @@ fn summarize_sheet(file_path: &Path, relative: &Path, content: &str) -> SheetSum
 fn read_sheet(root: String, relative_path: String) -> Result<String, String> {
     let target = resolve_existing_sheet(&root, &relative_path)?;
     read_markdown_utf8(&target, Path::new(&relative_path))
+}
+
+#[tauri::command]
+async fn export_sheet_docx(path: String, title: String, content: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        document_export::export_sheet_docx(&path, &title, &content)
+    })
+    .await
+    .map_err(|error| format!("The background export worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn export_sheet_pdf(path: String, title: String, content: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        document_export::export_sheet_pdf(&path, &title, &content)
+    })
+    .await
+    .map_err(|error| format!("The background export worker stopped unexpectedly: {error}"))?
+}
+
+#[tauri::command]
+async fn export_sheet_epub(path: String, title: String, content: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        document_export::export_sheet_epub(&path, &title, &content)
+    })
+    .await
+    .map_err(|error| format!("The background export worker stopped unexpectedly: {error}"))?
 }
 
 #[tauri::command]
@@ -2009,6 +2037,9 @@ pub fn run() {
             open_inbox,
             ensure_project_identity,
             read_sheet,
+            export_sheet_docx,
+            export_sheet_pdf,
+            export_sheet_epub,
             save_sheet,
             preserve_local_conflict,
             list_sheet_revisions,

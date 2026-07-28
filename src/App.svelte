@@ -43,6 +43,7 @@
     type SyncAvailability,
   } from "./lib/sync";
   import { applyTheme, themes } from "./lib/themes";
+  import { exportSheet, type ExportFormat } from "./lib/documentExport";
 
   interface FolderSummary {
     path: string;
@@ -301,6 +302,8 @@ It passed the abandoned signal house before descending between black pines to th
   let historyVisible = false;
   let historyLoading = false;
   let historyRestoring = false;
+  let exportRunning = false;
+  let exportMenuVisible = false;
   let historyRevisions: RevisionSummary[] = [];
   let selectedRevisionId: string | null = null;
   let selectedRevision: RevisionSummary | undefined;
@@ -318,7 +321,7 @@ It passed the abandoned signal house before descending between black pines to th
   let externalConflictPath: string | null = null;
   let externalDiskContent: string | null = null;
   let resolvingExternalConflict = false;
-  let appVersion = "0.4.6";
+  let appVersion = "0.5.0";
   let automaticUpdateChecks = true;
   let updateVisible = false;
   let updateChecking = false;
@@ -781,6 +784,7 @@ It passed the abandoned signal house before descending between black pines to th
   }
 
   function closeToolbarMenus(): void {
+    exportMenuVisible = false;
     themeMenuVisible = false;
     syncMenuVisible = false;
     writerMenuVisible = false;
@@ -1412,6 +1416,7 @@ It passed the abandoned signal house before descending between black pines to th
 
   function openSyncMenu(): void {
     syncMenuVisible = !syncMenuVisible;
+    exportMenuVisible = false;
     goalMenuVisible = false;
     focusMenuVisible = false;
     writerMenuVisible = false;
@@ -1952,6 +1957,7 @@ It passed the abandoned signal house before descending between black pines to th
     historyVisible = true;
     historyMessage = "";
     restoreConfirmId = null;
+    exportMenuVisible = false;
     goalMenuVisible = false;
     focusMenuVisible = false;
     writerMenuVisible = false;
@@ -1971,6 +1977,24 @@ It passed the abandoned signal house before descending between black pines to th
       historyMessage = error instanceof Error ? error.message : String(error);
     } finally {
       historyLoading = false;
+    }
+  }
+
+  async function exportCurrentSheet(format: ExportFormat): Promise<void> {
+    if (!desktopAvailable() || !libraryPath || !activeSheetPath || trashActive || exportRunning) {
+      return;
+    }
+    closeToolbarMenus();
+    exportRunning = true;
+    try {
+      const destination = await exportSheet(format, activeSheet, content);
+      if (!destination) return;
+      errorMessage = "";
+      saveStatus = `Exported ${format.toUpperCase()}`;
+    } catch (error) {
+      errorMessage = `Cannot export this sheet: ${errorText(error)}`;
+    } finally {
+      exportRunning = false;
     }
   }
 
@@ -3073,6 +3097,46 @@ It passed the abandoned signal house before descending between black pines to th
       <div class="document-title">{activeSheet}</div>
 
       <div class="toolbar-group toolbar-end">
+        <div class="export-control">
+          <button
+            class:active={exportMenuVisible}
+            class="export-button"
+            disabled={!desktopAvailable() || !libraryPath || !activeSheetPath || trashActive || exportRunning}
+            aria-label="Export current sheet"
+            aria-haspopup="menu"
+            aria-expanded={exportMenuVisible}
+            title="Export current sheet"
+            onclick={() => {
+              exportMenuVisible = !exportMenuVisible;
+              syncMenuVisible = false;
+              goalMenuVisible = false;
+              focusMenuVisible = false;
+              writerMenuVisible = false;
+              themeMenuVisible = false;
+            }}
+          >
+            <span class="export-symbol" aria-hidden="true">⇩</span>
+            <span>{exportRunning ? "Exporting…" : "Export"}</span>
+          </button>
+          {#if exportMenuVisible}
+            <div class="export-menu" role="menu" aria-label="Export current sheet">
+              <p class="eyebrow">EXPORT SHEET</p>
+              <button role="menuitem" onclick={() => void exportCurrentSheet("docx")}>
+                <span class="export-format-mark">W</span>
+                <span><strong>Word document</strong><small>Editable manuscript (.docx)</small></span>
+              </button>
+              <button role="menuitem" onclick={() => void exportCurrentSheet("pdf")}>
+                <span class="export-format-mark">P</span>
+                <span><strong>PDF</strong><small>Fixed-layout manuscript (.pdf)</small></span>
+              </button>
+              <button role="menuitem" onclick={() => void exportCurrentSheet("epub")}>
+                <span class="export-format-mark">E</span>
+                <span><strong>EPUB</strong><small>Reflowable ebook (.epub)</small></span>
+              </button>
+            </div>
+          {/if}
+        </div>
+
         <button
           class="history-button"
           disabled={!libraryPath || !activeSheetPath || historyLoading}
@@ -3236,6 +3300,7 @@ It passed the abandoned signal house before descending between black pines to th
             onclick={() => {
               goalMenuVisible = !goalMenuVisible;
               sessionGoalDraft = sessionGoal;
+              exportMenuVisible = false;
               focusMenuVisible = false;
               writerMenuVisible = false;
               themeMenuVisible = false;
@@ -3294,6 +3359,7 @@ It passed the abandoned signal house before descending between black pines to th
             title={`Writing focus: ${writingFocusMode}`}
             onclick={() => {
               focusMenuVisible = !focusMenuVisible;
+              exportMenuVisible = false;
               goalMenuVisible = false;
               writerMenuVisible = false;
               themeMenuVisible = false;
@@ -3342,6 +3408,7 @@ It passed the abandoned signal house before descending between black pines to th
             title="Writer appearance"
             onclick={() => {
               writerMenuVisible = !writerMenuVisible;
+              exportMenuVisible = false;
               goalMenuVisible = false;
               themeMenuVisible = false;
               focusMenuVisible = false;
@@ -3478,6 +3545,7 @@ It passed the abandoned signal house before descending between black pines to th
             aria-expanded={themeMenuVisible}
             onclick={() => {
               themeMenuVisible = !themeMenuVisible;
+              exportMenuVisible = false;
               goalMenuVisible = false;
               writerMenuVisible = false;
               focusMenuVisible = false;

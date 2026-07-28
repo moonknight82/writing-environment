@@ -833,6 +833,7 @@ main.app-fullscreen .editor-toolbar {
 .writer-control,
 .writing-focus-control,
 .session-goal-control,
+.export-control,
 .sync-control {
   position: relative;
 }
@@ -880,7 +881,8 @@ main.app-fullscreen .editor-toolbar {
   font-size: 14px;
 }
 
-.history-button {
+.history-button,
+.export-button {
   display: flex;
   min-height: 32px;
   align-items: center;
@@ -894,18 +896,88 @@ main.app-fullscreen .editor-toolbar {
   white-space: nowrap;
 }
 
-.history-button:hover:not(:disabled) {
+.history-button:hover:not(:disabled),
+.export-button:hover:not(:disabled),
+.export-button.active {
   color: var(--text);
   background: var(--accent-soft);
 }
 
-.history-button:disabled {
+.history-button:disabled,
+.export-button:disabled {
   cursor: default;
   opacity: 0.45;
 }
 
-.history-symbol {
+.history-symbol,
+.export-symbol {
   font-size: 14px;
+}
+
+.export-menu {
+  position: absolute;
+  z-index: 12;
+  top: 40px;
+  right: 0;
+  width: 270px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-raised);
+  box-shadow: 0 14px 38px rgb(0 0 0 / 14%);
+}
+
+.export-menu .eyebrow {
+  margin: 2px 6px 8px;
+}
+
+.export-menu button {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 9px 8px;
+  border-radius: 8px;
+  color: var(--text);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.export-menu button:hover,
+.export-menu button:focus-visible {
+  outline: 0;
+  background: var(--accent-soft);
+}
+
+.export-format-mark {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--accent);
+  font-family: var(--prose-font);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.export-menu strong,
+.export-menu small {
+  display: block;
+}
+
+.export-menu strong {
+  margin-bottom: 2px;
+  font-size: 11px;
+}
+
+.export-menu small {
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1.35;
 }
 
 .sync-menu {
@@ -2437,14 +2509,16 @@ textarea::selection {
   .session-goal-button small,
   .sync-button > span:not(.sync-symbol),
   .sync-button small,
-  .history-button > span:not(.history-symbol) {
+  .history-button > span:not(.history-symbol),
+  .export-button > span:not(.export-symbol) {
     display: none;
   }
 
   .writing-focus-button,
   .session-goal-button,
   .sync-button,
-  .history-button {
+  .history-button,
+  .export-button {
     width: 32px;
     justify-content: center;
     padding: 0;
@@ -2470,6 +2544,7 @@ textarea::selection {
   .writer-menu,
   .writing-focus-menu,
   .session-goal-menu,
+  .export-menu,
   .sync-menu {
     position: fixed;
     top: 52px;
