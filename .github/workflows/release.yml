@@ -114,11 +114,11 @@ jobs:
         with:
           releaseId: ${{ needs.prepare-release.outputs.release_id }}
           releaseBody: |
-            Makes ordinary typing responsive again on macOS, Linux amd64, and Raspberry Pi. Word and session counts no longer rescan and split the complete manuscript on every character; they update after a short typing pause without changing autosave timing.
+            Moves native autosave persistence off the interactive application thread on macOS, Linux amd64, and Raspberry Pi. History snapshots, atomic file replacement, and SQLite index maintenance now run on a blocking worker after 1.2 seconds of typing inactivity.
 
-            Writing Focus now keeps three persistent overlay regions instead of rebuilding the complete overlay after every Svelte update. Paragraph boundaries are found by scanning the active paragraph rather than all preceding text, visual refreshes are limited to one per animation frame, and scrollbar geometry is measured only after a real layout change.
+            Filesystem notifications caused by the app's own save are coalesced until editing and saving are idle, preventing a save from immediately triggering a full library reconciliation. The status bar now distinguishes unsaved typing from an active disk save.
 
-            Autosave, external-change protection, universal sync, Inbox, and Trash behavior are unchanged from 0.4.4.
+            History behavior, atomic writes, external-change and disk-conflict protection, universal sync, Inbox, and Trash remain unchanged.
 
             Signed desktop release for macOS Apple Silicon, Linux amd64, and Raspberry Pi ARM64.
 

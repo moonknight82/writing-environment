@@ -32,7 +32,11 @@ textarea and schedules autosave immediately, while word/session counts are coale
 typing pause. Writing Focus uses three persistent overlay text nodes (before, active, and after),
 scans only the current paragraph for its boundary, and refreshes at most once per animation frame.
 Scrollbar geometry is remeasured only when layout settings or the window size change, not after
-every character.
+every character. Native persistence—including History snapshots, atomic replacement, and index
+maintenance—runs on a blocking worker rather than the application event thread. Filesystem events
+caused by a local save remain observable, but their library reconciliation is coalesced until local
+editing and the save transaction are idle; external changes are still protected by the expected
+disk-version check at the next save.
 
 The desktop application maintains a rebuildable SQLite FTS index under its application-data directory, isolated by canonical project path. Project opening reconciles file modification metadata incrementally, saved sheets update only their own index entry, and search reads from FTS. A missing, incompatible, or corrupt index is rebuilt from Markdown; if indexing remains unavailable, the application falls back to bounded direct scans. SQLite is always derived state and never becomes authoritative manuscript storage.
 

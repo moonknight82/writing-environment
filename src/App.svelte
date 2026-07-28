@@ -111,6 +111,8 @@
   type SyncRecoveryTarget = "local" | "remote";
 
   const UPDATE_CHECK_INTERVAL = 24 * 60 * 60 * 1000;
+  const AUTOSAVE_IDLE_DELAY = 1200;
+  const LOCAL_SAVE_REFRESH_DELAY = 1600;
 
   const prototypeSheets: SheetSummary[] = [
     {
@@ -280,6 +282,7 @@ It passed the abandoned signal house before descending between black pines to th
   let dirty = false;
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
   let saveInFlight: Promise<boolean> | null = null;
+  let localSaveRefreshAfter = 0;
   let syncTimer: ReturnType<typeof setTimeout> | undefined;
   let syncInterval: ReturnType<typeof setInterval> | undefined;
   let syncAvailability: SyncAvailability | null = null;
@@ -315,7 +318,7 @@ It passed the abandoned signal house before descending between black pines to th
   let externalConflictPath: string | null = null;
   let externalDiskContent: string | null = null;
   let resolvingExternalConflict = false;
-  let appVersion = "0.4.5";
+  let appVersion = "0.4.6";
   let automaticUpdateChecks = true;
   let updateVisible = false;
   let updateChecking = false;
@@ -541,7 +544,9 @@ It passed the abandoned signal house before descending between black pines to th
   async function initializeLibraryChangeListener(): Promise<void> {
     const unlisten = await listen<LibraryFilesChanged>("library-files-changed", (event) => {
       if (event.payload.root !== libraryPath) return;
-      scheduleExternalLibraryRefresh();
+      scheduleExternalLibraryRefresh(
+        Math.max(60, localSaveRefreshAfter - Date.now()),
+      );
     });
     if (componentDestroyed) unlisten();
     else libraryChangeUnlisten = unlisten;
@@ -570,7 +575,19 @@ It passed the abandoned signal house before descending between black pines to th
       libraryRefreshPending = true;
       return;
     }
-    if (loadingLibrary || mutatingLibrary || syncRunning || resolvingExternalConflict) {
+    const localSaveDelay = localSaveRefreshAfter - Date.now();
+    if (localSaveDelay > 0) {
+      scheduleExternalLibraryRefresh(Math.max(60, localSaveDelay));
+      return;
+    }
+    if (
+      dirty
+      || saveInFlight
+      || loadingLibrary
+      || mutatingLibrary
+      || syncRunning
+      || resolvingExternalConflict
+    ) {
       scheduleExternalLibraryRefresh(400);
       return;
     }
@@ -979,9 +996,9 @@ It passed the abandoned signal house before descending between black pines to th
       return;
     }
 
-    saveStatus = "Saving…";
+    saveStatus = "Unsaved changes";
 
-    saveTimer = setTimeout(() => void persistCurrentSheet(), 650);
+    saveTimer = setTimeout(() => void persistCurrentSheet(), AUTOSAVE_IDLE_DELAY);
   }
 
   function persistCurrentSheet(): Promise<boolean> {
@@ -997,6 +1014,7 @@ It passed the abandoned signal house before descending between black pines to th
   async function performCurrentSheetSave(): Promise<boolean> {
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = undefined;
+    if (!externalConflictVisible) saveStatus = "Saving…";
     flushTypingMetrics();
     const versionBeingSaved = content;
     const projectBeingSaved = libraryPath;
@@ -1012,6 +1030,7 @@ It passed the abandoned signal house before descending between black pines to th
           versionBeingSaved,
           expectedDiskContent,
         );
+        localSaveRefreshAfter = Date.now() + LOCAL_SAVE_REFRESH_DELAY;
       } else {
         savePrototypeSheet(sheetBeingSaved, versionBeingSaved);
       }

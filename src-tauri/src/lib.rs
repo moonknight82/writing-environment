@@ -356,7 +356,21 @@ fn read_sheet(root: String, relative_path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn save_sheet(
+async fn save_sheet(
+    app: tauri::AppHandle,
+    root: String,
+    relative_path: String,
+    content: String,
+    expected_content: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        save_sheet_blocking(app, root, relative_path, content, expected_content)
+    })
+    .await
+    .map_err(|error| format!("The background save worker stopped unexpectedly: {error}"))?
+}
+
+fn save_sheet_blocking(
     app: tauri::AppHandle,
     root: String,
     relative_path: String,
