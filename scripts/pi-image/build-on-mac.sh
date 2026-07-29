@@ -6,12 +6,12 @@ readonly repo_root="$(cd "$script_dir/../.." && pwd)"
 readonly image_gen_commit="d409bd28212648941f16e1f3f8cad5f863f17ce8"
 readonly image_gen_tag="writing-environment-rpi-image-gen:${image_gen_commit:0:12}"
 
-artifact=""
+app_deb=""
 password_hash="${WRITING_ENVIRONMENT_IMAGE_PASSWORD_HASH:-}"
 use_default_password=0
 image_locale="${WRITING_ENVIRONMENT_IMAGE_LOCALE:-en_US.UTF-8}"
 keyboard_keymap="${WRITING_ENVIRONMENT_IMAGE_KEYBOARD_KEYMAP:-us}"
-keyboard_layout="${WRITING_ENVIRONMENT_IMAGE_KEYBOARD_LAYOUT:-English (US)}"
+keyboard_layout="${WRITING_ENVIRONMENT_IMAGE_KEYBOARD_LAYOUT:-English (US, intl., with dead keys)}"
 image_timezone="${WRITING_ENVIRONMENT_IMAGE_TIMEZONE:-America/Sao_Paulo}"
 wifi_country="${WRITING_ENVIRONMENT_IMAGE_WIFI_COUNTRY:-BR}"
 
@@ -20,17 +20,19 @@ usage() {
 Usage: scripts/pi-image/build-on-mac.sh [options]
 
 Build a personalized Raspberry Pi 4 image on an Apple Silicon Mac using
-Docker Desktop. If no artifact is supplied, the newest Pi ARM64 artifact under
-artifacts/pi-arm64 is used. If no password option is supplied, the script
-prompts for the recovery-user password without storing the plaintext value.
+Docker Desktop. If no package is supplied, the newest Pi ARM64 Debian package
+under artifacts/pi-arm64 is used. The build also creates and signs the matching
+Writing Environment APT repository. If no password option is supplied, the
+script prompts for the recovery-user password without storing the plaintext.
 
 Options:
-  --artifact FILE             Pi ARM64 application artifact
+  --app-deb FILE              Pi ARM64 application Debian package
   --password-hash HASH        SHA-512 crypt recovery password hash
   --default-password          Set the writer password to "writer"
   --locale LOCALE             System locale (default: en_US.UTF-8)
   --keyboard-keymap KEYMAP    Console/XKB keymap (default: us)
-  --keyboard-layout LABEL     Debian keyboard variant label (default: English (US))
+  --keyboard-layout LABEL     Debian keyboard variant label
+                              (default: English (US, intl., with dead keys))
   --timezone ZONE             IANA timezone (default: America/Sao_Paulo)
   --wifi-country CODE         Two-letter regulatory country (default: BR)
 EOF
@@ -38,7 +40,7 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --artifact) artifact="${2:-}"; shift 2 ;;
+    --app-deb) app_deb="${2:-}"; shift 2 ;;
     --password-hash) password_hash="${2:-}"; shift 2 ;;
     --default-password) use_default_password=1; shift ;;
     --locale) image_locale="${2:-}"; shift 2 ;;
@@ -56,10 +58,10 @@ done
 command -v docker >/dev/null 2>&1 || { printf 'Docker Desktop is required.\n' >&2; exit 1; }
 docker info >/dev/null 2>&1 || { printf 'Start Docker Desktop before building the image.\n' >&2; exit 1; }
 
-if [[ -z "$artifact" ]]; then
-  artifact="$(find "$repo_root/artifacts/pi-arm64" -type f -name '*.tar.gz' -print 2>/dev/null | LC_ALL=C sort | tail -n 1)"
+if [[ -z "$app_deb" ]]; then
+  app_deb="$(find "$repo_root/artifacts/pi-arm64" -type f -name '*.deb' -print 2>/dev/null | LC_ALL=C sort | tail -n 1)"
 fi
-[[ -f "$artifact" ]] || { printf 'No Pi ARM64 application artifact was found.\n' >&2; exit 1; }
+[[ -f "$app_deb" ]] || { printf 'No Pi ARM64 application Debian package was found.\n' >&2; exit 1; }
 
 if [[ "$use_default_password" == "1" && -n "$password_hash" ]]; then
   printf 'Use either --default-password or --password-hash, not both.\n' >&2
@@ -90,7 +92,14 @@ timestamp="$(date +%Y%m%d-%H%M%S)"
 output="$repo_root/artifacts/pi-image/mac-$timestamp"
 source_dir="$output/source"
 mkdir -p "$output"
-"$script_dir/prepare-source.sh" --artifact "$artifact" --output "$source_dir"
+apt_release="$output/apt-release"
+"$repo_root/scripts/apt/build-on-mac.sh" \
+  --app-deb "$app_deb" \
+  --output "$apt_release"
+"$script_dir/prepare-source.sh" \
+  --app-deb "$app_deb" \
+  --packages "$apt_release/packages" \
+  --output "$source_dir"
 
 docker build \
   --platform linux/arm64 \
@@ -111,6 +120,8 @@ docker run --rm \
   --volume "$source_dir:/source:ro" \
   --volume "$output:/output" \
   "$image_gen_tag"
+
+install -m 0644 "$repo_root/deploy/pi-image/FLASHING.md" "$output/README.md"
 
 (
   cd "$output"

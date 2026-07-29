@@ -6,20 +6,23 @@ Writing Environment publishes signed application updates from the public GitHub 
 
 The updater public key is committed in `src-tauri/tauri.conf.json`. Its private counterpart must never be committed. Store the complete private-key text as the GitHub Actions repository secret `TAURI_SIGNING_PRIVATE_KEY`, and keep a separate offline backup. Losing this key prevents already-installed copies from trusting future updates.
 
+The Raspberry Pi APT archive uses a separate OpenPGP key. Its public half is committed as `deploy/apt-repository/writing-environment-archive-keyring.asc`; its private half is stored in the GitHub Actions secret `APT_SIGNING_PRIVATE_KEY` and in the ignored local `.apt-signing` directory. The release-only fingerprint is `6B9286D479AB874C435A3EADEF2E16B217210ECB`. Keep a secure offline backup: installed Pis require a package signed by the current key to trust a future replacement.
+
 The current macOS package uses ad-hoc Apple code signing for personal testing. Tauri's updater signature verifies update authenticity, but it does not replace Apple Developer ID signing or notarization for general distribution.
 
 ## Publish
 
 1. Make sure `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json` contain the same version.
-2. Update the release notes in `.github/workflows/release.yml` for the version being published.
+2. Update `.github/release-notes.md` for the version being published.
 3. Run `pnpm install --frozen-lockfile`, `pnpm build`, and `cargo test --manifest-path src-tauri/Cargo.toml`.
 4. Commit the release changes.
 5. Create and push a matching tag, such as `v0.3.1`.
 6. Watch the **Publish signed desktop release** workflow.
-7. Confirm the GitHub Release contains `latest.json`, signed macOS and Debian updater artifacts, and the Raspberry Pi manual bootstrap archive with its checksum and signature.
-8. Test **Writer (Aa) → Application updates → Check for Updates…** on each installed platform before relying on automatic checks.
+7. Confirm the GitHub Release contains `latest.json`, signed desktop artifacts, the Raspberry Pi manual archive, and the four appliance/repository packages.
+8. Confirm the Pages deployment publishes a valid signed APT repository at `https://moonknight82.github.io/writing-environment/apt`.
+9. Test both **Writer (Aa) → Application updates → Check for Updates…** and **Super+Space → Updates** before relying on automatic checks.
 
-GitHub's public ARM64 runner creates the Raspberry Pi Debian package natively. The manual Pi archive contains the executable extracted from that Debian bundle, allowing the bootstrap installation to identify future updates as Debian packages.
+GitHub's public ARM64 runner creates the Raspberry Pi Debian package natively. After the desktop release jobs finish, a second ARM64 job builds the appliance packages, signs standard Debian repository metadata, uploads the bootstrap packages to the GitHub Release, and deploys the static repository through GitHub Pages.
 
 ## Safety model
 
@@ -28,4 +31,6 @@ GitHub's public ARM64 runner creates the Raspberry Pi Debian package natively. T
 - The application saves the active sheet before download or installation.
 - Installation and restart always require an explicit click.
 - Linux Debian updates request authorization through the system privilege dialog.
-- Raspberry Pi OS and appliance-shell updates are never included in an app-only update.
+- The APT signing key is distinct from the Tauri updater key and is scoped to the separate Writing Environment source with `Signed-By`.
+- APT pinning gives the custom repository normal priority only for packages named `writing-environment*`; Raspberry Pi OS remains authoritative for the rest of the system.
+- The system drawer always asks before running `apt full-upgrade`; no appliance package reboots the Pi automatically.

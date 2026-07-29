@@ -1,0 +1,5 @@
+include "%L"
+
+# Match the familiar macOS US-International sequence for Portuguese cedilla.
+<dead_acute> <c> : "ç" ccedilla
+<dead_acute> <C> : "Ç" Ccedilla

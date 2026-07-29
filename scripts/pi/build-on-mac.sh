@@ -49,10 +49,18 @@ fi
 
 archive="$(find "$output" -maxdepth 1 -type f -name '*.tar.gz' -print -quit)"
 checksum="$(find "$output" -maxdepth 1 -type f -name '*.tar.gz.sha256' -print -quit)"
-[[ -n "$archive" && -n "$checksum" ]] || { printf 'Expected artifact and checksum were not exported.\n' >&2; exit 1; }
+app_deb="$(find "$output" -maxdepth 1 -type f -name '*.deb' -print -quit)"
+[[ -n "$archive" && -n "$checksum" && -n "$app_deb" ]] || {
+  printf 'Expected archive, checksum, and ARM64 Debian package were not exported.\n' >&2
+  exit 1
+}
+file "$app_deb" | grep -q 'Debian binary package' || {
+  printf 'The exported application package is not a Debian package.\n' >&2
+  exit 1
+}
 (
   cd "$output"
   shasum -a 256 -c "$(basename "$checksum")"
 )
 
-printf 'Pi artifact built on macOS:\n%s\nCopy it to the Pi, extract it, and run ./install.sh.\n' "$archive"
+printf 'Pi release built on macOS:\n%s\n%s\n' "$archive" "$app_deb"

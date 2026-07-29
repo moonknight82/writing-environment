@@ -1,0 +1,6 @@
+Types: deb
+URIs: https://moonknight82.github.io/writing-environment/apt
+Suites: trixie
+Components: main
+Architectures: arm64
+Signed-By: /usr/share/keyrings/writing-environment-archive-keyring.gpg

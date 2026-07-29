@@ -1,8 +1,8 @@
 # METABEGIN
 # X-Env-Layer-Name: writing-environment-desktop
-# X-Env-Layer-Version: 0.4.3
+# X-Env-Layer-Version: 0.5.2
 # X-Env-Layer-Category: application
-# X-Env-Layer-Desc: Minimal Labwc writing appliance with Writing Environment.
+# X-Env-Layer-Desc: Fullscreen Labwc writing appliance with Fuzzel system drawer.
 # X-Env-Layer-Requires: device-user-admin,systemd-min
 # METAEND
 ---
@@ -15,6 +15,7 @@ mmdebstrap:
     - file
     - fonts-liberation2
     - fonts-nunito-sans
+    - fuzzel
     - hunspell-en-us
     - hunspell-pt-br
     - libayatana-appindicator3-1
@@ -24,6 +25,9 @@ mmdebstrap:
     - locales
     - pi-bluetooth
     - pipanel
+    - plymouth
+    - plymouth-themes
+    - procps
     - pixtrix-icons
     - pixtrix-theme
     - raindrop
@@ -35,25 +39,27 @@ mmdebstrap:
     - unzip
     - util-linux
     - wfplug-bluetooth
+    - wlopm
     - wlr-randr
     - xdg-utils
   customize-hooks:
     - tar --no-same-owner -xpf writing-environment-rootfs.tar -C "$1"
     - |-
       set -eu
-      localsend_deb=/usr/local/share/writing-environment/packages/localsend-arm64.deb
-      test -f "$1$localsend_deb"
-      chroot "$1" apt-get install -y "$localsend_deb"
-      rm -f "$1$localsend_deb"
+      package_dir=/usr/local/share/writing-environment/packages
+      test -f "$1$package_dir/localsend-arm64.deb"
+      test -f "$1$package_dir/writing-environment-appliance_"*.deb
+      chroot "$1" sh -c "apt-get install -y $package_dir/*.deb"
+      rm -f "$1$package_dir"/*.deb
       rmdir "$1/usr/local/share/writing-environment/packages"
     - |-
       set -eu
       sed -i 's#<name>PiXtrix</name>#<name>PiXonyx</name>#' "$1/etc/xdg/labwc/rc.xml"
-      if ! grep -q 'writing-environment-panel-menu' "$1/etc/xdg/labwc/rc.xml"; then
+      if ! grep -q 'writing-environment-system-menu' "$1/etc/xdg/labwc/rc.xml"; then
         sed -i '/<\/keyboard>/i\
-        <!-- writing-environment-panel-menu -->\
-        <keybind key="C-Tab">\
-          <action name="Execute" command="writing-environment-panel-menu" />\
+        <!-- writing-environment-system-menu -->\
+        <keybind key="W-Space">\
+          <action name="Execute" command="writing-environment-system-menu" />\
         </keybind>' "$1/etc/xdg/labwc/rc.xml"
       fi
       if ! grep -q 'writing-environment-settings' "$1/etc/xdg/labwc/rc.xml"; then
@@ -66,6 +72,15 @@ mmdebstrap:
       sed -i "s/gtk-theme='PiXtrix'/gtk-theme='PiXonyx'/" "$1/usr/share/glib-2.0/schemas/10_rpd-wayland-core.gschema.override"
       chroot "$1" glib-compile-schemas /usr/share/glib-2.0/schemas
       chroot "$1" sh -c 'command -v dconf >/dev/null 2>&1 && dconf update || true'
+      chmod 0755 \
+        "$1/usr/local/bin/writing-environment-session-setup" \
+        "$1/usr/local/bin/writing-environment-system-menu"
+      chroot "$1" plymouth-set-default-theme -R writing-environment
+      if [ "$IGconf_locale_keyboard_keymap" != "us" ] \
+        || [ "$IGconf_locale_keyboard_layout" != "English (US, intl., with dead keys)" ]; then
+        sed -i '/^XKB_DEFAULT_(MODEL\|LAYOUT\|VARIANT\)=/d' \
+          "$1/etc/skel/.config/labwc/environment"
+      fi
       locale_input="${IGconf_locale_default%%.*}"
       chroot "$1" localedef -i "$locale_input" -f UTF-8 "$IGconf_locale_default"
       printf 'LANG=%s\n' "$IGconf_locale_default" > "$1/etc/locale.conf"

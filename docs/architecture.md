@@ -10,6 +10,7 @@
 6. Package the proven application in a minimal Labwc-based Raspberry Pi OS image. (Completed.)
 7. Add a rebuildable SQLite FTS index and validate 10,000-sheet libraries on the 2 GB Raspberry Pi. (Current milestone.)
 8. Add portable DOCX, PDF, and EPUB export without changing Markdown's role as the authoritative manuscript format.
+9. Publish the Raspberry Pi application and appliance overlay as signed Debian packages while retaining Raspberry Pi OS as the base distribution. (Completed.)
 
 ## Application boundaries
 

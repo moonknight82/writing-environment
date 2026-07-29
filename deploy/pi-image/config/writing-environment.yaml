@@ -16,7 +16,7 @@ image:
 locale:
   default: en_US.UTF-8
   keyboard_keymap: us
-  keyboard_layout: English (US)
+  keyboard_layout: English (US, intl., with dead keys)
   timezone: America/Sao_Paulo
 
 ieee80211:

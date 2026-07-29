@@ -1,0 +1,25 @@
+#!/bin/sh
+set -u
+
+# The appliance has no persistent desktop panel. Stop any panel or idle helper
+# inherited from Raspberry Pi's system Labwc session, including its respawner.
+for pattern in \
+  '/usr/bin/lwrespawn /usr/bin/wf-panel-pi' \
+  '/usr/bin/lwrespawn /usr/bin/pcmanfm-pi' \
+  '/usr/bin/wf-panel-pi' \
+  '/usr/bin/pcmanfm-pi' \
+  '/usr/bin/swayidle'; do
+  pgrep -f "$pattern" 2>/dev/null | while read -r pid; do
+    kill "$pid" 2>/dev/null || true
+  done
+done
+pkill -x wf-panel-pi 2>/dev/null || true
+pkill -x swayidle 2>/dev/null || true
+pkill -x pcmanfm 2>/dev/null || true
+
+if command -v wlopm >/dev/null 2>&1; then
+  wlopm --on '*' >/dev/null 2>&1 || true
+fi
+
+/usr/local/bin/writing-environment-system-menu --refresh-updates >/dev/null 2>&1 &
+exit 0

@@ -1,0 +1,12 @@
+Package: writing-environment-repository
+Version: @PACKAGE_VERSION@
+Architecture: all
+Maintainer: Writing Environment contributors
+Homepage: https://github.com/moonknight82/writing-environment
+Priority: optional
+Section: admin
+Depends: ca-certificates
+Description: Signed APT repository configuration for Writing Environment
+ Installs the repository signing key, deb822 APT source, and package-scoped
+ pinning for Writing Environment packages. Raspberry Pi OS sources remain
+ installed and continue to provide the base operating system.

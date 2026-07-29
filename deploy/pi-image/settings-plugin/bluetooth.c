@@ -83,7 +83,7 @@ void init_plugin(GtkWidget *parent)
     gtk_box_pack_start(GTK_BOX(bluetooth_page), button, FALSE, FALSE, 0);
 
     note = gtk_label_new(
-        "Tip: Bluetooth remains available from the panel icon beside Wi-Fi, too."
+        "Tip: Super+Space shows Bluetooth status and opens this manager directly."
     );
     gtk_label_set_line_wrap(GTK_LABEL(note), TRUE);
     gtk_label_set_max_width_chars(GTK_LABEL(note), 58);

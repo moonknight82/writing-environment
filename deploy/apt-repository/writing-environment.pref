@@ -1,0 +1,7 @@
+Package: *
+Pin: release o=Writing Environment
+Pin-Priority: 1
+
+Package: writing-environment*
+Pin: release o=Writing Environment
+Pin-Priority: 700

@@ -1,0 +1,241 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+readonly cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/writing-environment"
+readonly update_cache="$cache_dir/update-count"
+readonly update_cache_max_age=21600
+readonly fuzzel_config="/etc/writing-environment/fuzzel.ini"
+
+sanitize_label() {
+  tr '\n\r\t' '   ' \
+    | LC_ALL=C tr -d '\000-\010\013\014\016-\037\177' \
+    | cut -c 1-54
+}
+
+spawn() {
+  setsid "$@" </dev/null >/dev/null 2>&1 &
+}
+
+terminal_exec() {
+  spawn x-terminal-emulator -e "$@"
+}
+
+refresh_update_cache() {
+  mkdir -p "$cache_dir"
+  exec 9>"$cache_dir/update-count.lock"
+  flock -n 9 || return 0
+
+  local count listing temporary
+  listing="$(apt list --upgradable 2>/dev/null)" || return 0
+  count="$(awk 'NR > 1 { count++ } END { print count + 0 }' <<<"$listing")"
+  temporary="$(mktemp "$cache_dir/update-count.XXXXXX")"
+  printf '%s\n' "$count" >"$temporary"
+  mv "$temporary" "$update_cache"
+}
+
+update_cache_is_stale() {
+  [[ -f "$update_cache" ]] || return 0
+  local modified now
+  modified="$(stat -c %Y "$update_cache" 2>/dev/null || printf '0')"
+  now="$(date +%s)"
+  (( now - modified > update_cache_max_age ))
+}
+
+wifi_status() {
+  if ! command -v nmcli >/dev/null 2>&1; then
+    printf 'unavailable'
+    return
+  fi
+
+  local radio device connection
+  radio="$(nmcli -t -f WIFI general 2>/dev/null | head -n 1)"
+  if [[ "$radio" != "enabled" ]]; then
+    printf 'off'
+    return
+  fi
+
+  device="$(nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null \
+    | awk -F: '$2 == "wifi" && $3 == "connected" { print $1; exit }')"
+  if [[ -z "$device" ]]; then
+    printf 'on, not connected'
+    return
+  fi
+
+  connection="$(nmcli -g GENERAL.CONNECTION device show "$device" 2>/dev/null \
+    | head -n 1 | sanitize_label)"
+  if [[ -n "$connection" && "$connection" != "--" ]]; then
+    printf 'connected to %s' "$connection"
+  else
+    printf 'connected'
+  fi
+}
+
+bluetooth_status() {
+  if ! command -v bluetoothctl >/dev/null 2>&1; then
+    printf 'unavailable'
+    return
+  fi
+
+  local controller connected
+  controller="$(timeout 2 bluetoothctl show 2>/dev/null || true)"
+  if [[ -z "$controller" ]]; then
+    printf 'unavailable'
+    return
+  fi
+  if ! grep -q '^[[:space:]]*Powered: yes' <<<"$controller"; then
+    printf 'off'
+    return
+  fi
+
+  connected="$(timeout 2 bluetoothctl devices Connected 2>/dev/null \
+    | awk '/^Device / { count++ } END { print count + 0 }')"
+  case "$connected" in
+    0) printf 'on, none connected' ;;
+    1) printf 'on, 1 connected' ;;
+    *) printf 'on, %s connected' "$connected" ;;
+  esac
+}
+
+updates_status() {
+  local count
+  if [[ ! -r "$update_cache" ]]; then
+    printf 'checking'
+    return
+  fi
+  read -r count <"$update_cache" || count=""
+  case "$count" in
+    0) printf 'system current' ;;
+    1) printf '1 available' ;;
+    ''|*[!0-9]*) printf 'checking' ;;
+    *) printf '%s available' "$count" ;;
+  esac
+}
+
+power_status() {
+  if ! command -v vcgencmd >/dev/null 2>&1; then
+    printf 'status unavailable'
+    return
+  fi
+  local value
+  value="$(vcgencmd get_throttled 2>/dev/null || true)"
+  case "$value" in
+    throttled=0x0) printf 'healthy' ;;
+    throttled=*) printf 'warning %s' "${value#throttled=}" ;;
+    *) printf 'status unavailable' ;;
+  esac
+}
+
+run_updates() {
+  printf 'Writing Environment system update\n\n'
+  if sudo apt-get update && sudo apt-get full-upgrade; then
+    refresh_update_cache
+    printf '\nUpdate complete.'
+  else
+    printf '\nThe update did not complete.'
+  fi
+  printf '\nPress Enter to close this window.\n'
+  read -r _
+}
+
+show_power_details() {
+  printf 'Raspberry Pi power and temperature\n\n'
+  vcgencmd get_throttled 2>/dev/null || printf 'Power status is unavailable.\n'
+  vcgencmd measure_temp 2>/dev/null || true
+  printf '\n0x0 means no current or historical power/thermal warning.\n'
+  printf 'Press Enter to close this window.\n'
+  read -r _
+}
+
+restart_writer() {
+  local pid
+  while read -r pid; do
+    [[ -n "$pid" && "$pid" != "$$" ]] && kill -TERM "$pid" 2>/dev/null || true
+  done < <(pgrep -f '^(/usr/bin|/opt/writing-environment)/writing-environment( |$)' || true)
+
+  for _ in {1..30}; do
+    pgrep -f '^(/usr/bin|/opt/writing-environment)/writing-environment( |$)' >/dev/null || break
+    sleep 0.1
+  done
+  spawn /usr/local/bin/writing-environment
+}
+
+confirm_action() {
+  local label="$1" choice
+  choice="$(printf 'Cancel\n%s\n' "$label" \
+    | fuzzel --config="$fuzzel_config" --dmenu --index --lines=2 --width=42 --prompt='Confirm: ')" || return 1
+  [[ "$choice" == "1" ]]
+}
+
+power_menu() {
+  local choice
+  choice="$(printf '%s\n' \
+    'Restart Writing Environment' \
+    'Restart device' \
+    'Turn off' \
+    'Back' \
+    | fuzzel --config="$fuzzel_config" --dmenu --index --lines=4 --width=42 --prompt='Power & recovery: ')" || return 0
+
+  case "$choice" in
+    0) confirm_action 'Restart Writing Environment' && restart_writer ;;
+    1) confirm_action 'Restart device' && loginctl reboot ;;
+    2) confirm_action 'Turn off' && loginctl poweroff ;;
+    3) show_menu ;;
+  esac
+}
+
+launch_localsend() {
+  if command -v gtk-launch >/dev/null 2>&1; then
+    spawn gtk-launch localsend_app
+  elif command -v localsend_app >/dev/null 2>&1; then
+    spawn localsend_app
+  fi
+}
+
+show_menu() {
+  update_cache_is_stale && refresh_update_cache >/dev/null 2>&1 &
+
+  local wifi bluetooth updates power choice
+  wifi="$(wifi_status)"
+  bluetooth="$(bluetooth_status)"
+  updates="$(updates_status)"
+  power="$(power_status)"
+
+  choice="$(printf '%s\n' \
+    "Wi-Fi — $wifi" \
+    "Bluetooth — $bluetooth" \
+    "Updates — $updates" \
+    "Power — $power" \
+    'Writing Environment' \
+    'Files' \
+    'Browser' \
+    'LocalSend' \
+    'Terminal' \
+    'System Settings' \
+    'Display' \
+    'Power & Recovery' \
+    | fuzzel --config="$fuzzel_config" --dmenu --index --lines=12 --width=54 --prompt='System: ')" || return 0
+
+  case "$choice" in
+    0) terminal_exec nmtui-connect ;;
+    1) spawn blueman-manager ;;
+    2) terminal_exec /usr/local/bin/writing-environment-system-menu --install-updates ;;
+    3) terminal_exec /usr/local/bin/writing-environment-system-menu --power-details ;;
+    4) spawn /usr/local/bin/writing-environment ;;
+    5) spawn pcmanfm ;;
+    6) spawn surf ;;
+    7) launch_localsend ;;
+    8) spawn x-terminal-emulator ;;
+    9) spawn rpcc ;;
+    10) spawn raindrop ;;
+    11) power_menu ;;
+  esac
+}
+
+case "${1:-}" in
+  --refresh-updates) refresh_update_cache ;;
+  --install-updates) run_updates ;;
+  --power-details) show_power_details ;;
+  --restart-writer) restart_writer ;;
+  '') show_menu ;;
+  *) printf 'Usage: writing-environment-system-menu [--refresh-updates|--install-updates|--power-details|--restart-writer]\n' >&2; exit 2 ;;
+esac

@@ -1,2 +1,8 @@
 # Use the minimal WebKit browser for rclone OAuth and ordinary web links.
 BROWSER=/usr/bin/surf
+
+# US physical keyboard with international dead keys. The project .XCompose
+# override makes apostrophe followed by C produce Portuguese cedilla.
+XKB_DEFAULT_MODEL=pc105
+XKB_DEFAULT_LAYOUT=us
+XKB_DEFAULT_VARIANT=intl

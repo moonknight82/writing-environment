@@ -32,3 +32,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Validate deployment scripts
+        run: |
+          bash -n scripts/apt/*.sh scripts/pi/*.sh scripts/pi-image/*.sh deploy/pi-image/*.sh

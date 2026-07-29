@@ -4,7 +4,7 @@ set -euo pipefail
 : "${WRITER_PASSWORD_HASH:?A hashed writer password is required.}"
 : "${IMAGE_LOCALE:=en_US.UTF-8}"
 : "${IMAGE_KEYBOARD_KEYMAP:=us}"
-: "${IMAGE_KEYBOARD_LAYOUT:=English (US)}"
+: "${IMAGE_KEYBOARD_LAYOUT:=English (US, intl., with dead keys)}"
 : "${IMAGE_TIMEZONE:=America/Sao_Paulo}"
 : "${IMAGE_WIFI_COUNTRY:=BR}"
 [[ -d /source/config && -d /source/layer ]] || {

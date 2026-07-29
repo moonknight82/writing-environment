@@ -1,0 +1,12 @@
+Package: writing-environment-shell
+Version: @PACKAGE_VERSION@
+Architecture: arm64
+Maintainer: Writing Environment contributors
+Homepage: https://github.com/moonknight82/writing-environment
+Priority: optional
+Section: utils
+Depends: writing-environment (>= @APP_VERSION@), bash, bluez, blueman, ca-certificates, curl, file, fonts-liberation2, fonts-nunito-sans, fuzzel, libayatana-appindicator3-1, librsvg2-2, locales, network-manager, pcmanfm, pi-bluetooth, plymouth, procps, raindrop, raspi-utils, rasputin, rc-gui, rpd-wayland-core, rpcc, surf, util-linux, wlopm, wlr-randr, xdg-utils
+Description: Minimal Raspberry Pi shell for Writing Environment
+ Installs the Labwc session helpers, Fuzzel system drawer, Raspberry Pi
+ settings integration, keyboard defaults, browser launcher, and appliance
+ desktop defaults used by Writing Environment.

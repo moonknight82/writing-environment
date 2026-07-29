@@ -1,8 +1,8 @@
 # Optional Raspberry Pi session overrides.
 #
-# The default starts Writing Environment in borderless maximized presentation
-# mode. Press Ctrl+Tab to show or hide the system panel, and Ctrl+Super+S to
-# open Control Centre. Set this to 0 for a normal resizable window.
+# The default starts Writing Environment in native fullscreen presentation
+# mode. On the appliance image, Super+Space opens the system drawer and
+# Ctrl+Super+S opens Control Centre. Set this to 0 for a normal window.
 # WRITING_ENVIRONMENT_APPLIANCE=0
 #
 # The Raspberry Pi launcher disables WebKitGTK's DMA-BUF renderer by default to

@@ -12,3 +12,4 @@ reports/pi/*.txt
 artifacts/
 writing-environment.key
 writing-environment.key.pub
+.apt-signing/

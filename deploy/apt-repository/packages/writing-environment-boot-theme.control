@@ -1,0 +1,12 @@
+Package: writing-environment-boot-theme
+Version: @PACKAGE_VERSION@
+Architecture: all
+Maintainer: Writing Environment contributors
+Homepage: https://github.com/moonknight82/writing-environment
+Priority: optional
+Section: utils
+Depends: plymouth, plymouth-themes
+Description: Quiet boot theme for the Writing Environment appliance
+ Installs and activates the Writing Environment Plymouth splash. Raspberry Pi
+ boot command-line customization is applied by the appliance image or one-time
+ migration installer and is not overwritten during ordinary package upgrades.

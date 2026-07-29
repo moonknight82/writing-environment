@@ -35,7 +35,7 @@ The script:
 6. installs a launcher, application-menu entry, and scalable icon;
 7. adds one marked launch command to the user's Labwc autostart file.
 
-The application opens in borderless maximized presentation mode at the next graphical login. It is not a locked kiosk: F11 returns it to a normal resizable window, while `Alt+F4`, Terminal, and the Raspberry Pi desktop remain available for recovery and diagnostics. Writing Environment's own distraction-free control can hide its sidebars while writing.
+The application opens in native fullscreen presentation mode at the next graphical login. It is not a locked kiosk: F11 returns it to a normal resizable window, while `Alt+F4`, Terminal, and the Raspberry Pi desktop remain available for recovery and diagnostics. Writing Environment's own distraction-free control can hide its sidebars while writing. The dedicated appliance image additionally provides its `Super+Space` system drawer.
 
 Useful installation variants:
 
@@ -86,7 +86,7 @@ Install and start Docker Desktop, then run this from the project root:
 scripts/pi/build-on-mac.sh
 ```
 
-The build runs in a native Linux ARM64 container and uses Debian Bookworm as a conservative compatibility baseline. Its output is written under a timestamped `artifacts/pi-arm64/mac-*` directory. The directory contains a `.tar.gz` artifact and its SHA-256 checksum.
+The build runs in a native Linux ARM64 container and uses Debian Bookworm as a conservative compatibility baseline. Its output is written under a timestamped `artifacts/pi-arm64/mac-*` directory. The directory contains a manual `.tar.gz` artifact, its SHA-256 checksum, and the ARM64 application `.deb` used by the image and APT builders.
 
 Copy only the `.tar.gz` file to the Pi, then install it without compiling:
 
@@ -121,6 +121,19 @@ scripts/pi/build-on-pi.sh --skip-packages
 Native artifacts are written under timestamped `artifacts/pi-arm64/pi-*` directories. Extract and run their included `install.sh` in the same way as a Mac-built artifact.
 
 Every prebuilt installer verifies the archive's internal SHA-256 manifest, confirms that the executable is Linux ARM64, checks dynamic-library availability, and refuses unsupported hardware unless explicitly allowed. Project folders, recovery snapshots, Trash, and existing preferences are never included in or removed by an artifact installation.
+
+## Signed appliance updates
+
+Version 0.5.2 adds `https://moonknight82.github.io/writing-environment/apt` as a package-scoped, signed APT source. It coexists with the Raspberry Pi OS sources. Fresh dedicated images include it automatically; older appliance installations need the one-time `writing-environment-repository` bootstrap package documented in [the image guide](pi-image.md#update-without-reflashing).
+
+After bootstrap, **Super+Space → Updates** or the following commands update both the base OS and Writing Environment packages:
+
+```sh
+sudo apt update
+sudo apt full-upgrade
+```
+
+APT owns the application, appliance scripts, system drawer configuration, Control Centre plugin, and boot theme. It does not own manuscript folders, application data, rclone credentials, or user preferences.
 
 ## What is installed
 

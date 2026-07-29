@@ -98,6 +98,10 @@ info "Building the optimized native ARM64 application."
 (
   cd "$repo_root"
   export CARGO_TARGET_DIR="$cargo_target_dir"
+  # Keep release builds within the Raspberry Pi 4 2 GB memory baseline. Cargo
+  # otherwise starts several rustc processes and the kernel may kill one while
+  # compiling GTK/GLib crates. Callers can opt into more parallelism explicitly.
+  export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
   pnpm install --frozen-lockfile
   pnpm tauri build --bundles deb --config '{"bundle":{"createUpdaterArtifacts":false}}'
 )

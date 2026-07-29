@@ -39,7 +39,8 @@ RUN --mount=type=cache,target=/root/.cargo/registry \
     updater_args='--config {"bundle":{"createUpdaterArtifacts":false}}'; \
   fi \
   && pnpm tauri build --bundles deb $updater_args \
-  && scripts/pi/package-artifact.sh /artifacts "$BUILD_ID"
+  && scripts/pi/package-artifact.sh /artifacts "$BUILD_ID" \
+  && cp src-tauri/target/release/bundle/deb/*.deb /artifacts/
 
 FROM scratch AS export
 COPY --from=build /artifacts/ /

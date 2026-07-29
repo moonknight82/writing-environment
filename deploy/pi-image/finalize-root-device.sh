@@ -56,8 +56,9 @@ mount "$boot_loop" "$boot_mount"
 mount "$root_loop" "$root_mount"
 
 cmdline="$boot_mount/cmdline.txt"
+config="$boot_mount/config.txt"
 fstab="$root_mount/etc/fstab"
-[[ -f "$cmdline" && -f "$fstab" ]] || {
+[[ -f "$cmdline" && -f "$config" && -f "$fstab" ]] || {
   printf 'The image does not contain the expected Raspberry Pi boot files.\n' >&2
   exit 1
 }
@@ -67,6 +68,33 @@ if grep -q 'root=/dev/disk/by-slot/system' "$cmdline"; then
 elif ! grep -q "root=UUID=$root_uuid" "$cmdline"; then
   printf 'Refusing to replace an unexpected root= value in cmdline.txt.\n' >&2
   exit 1
+fi
+
+python3 - "$cmdline" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+arguments = path.read_text(encoding="utf-8").split()
+arguments = [argument for argument in arguments if argument != "console=tty1"]
+for argument in (
+    "quiet",
+    "splash",
+    "logo.nologo",
+    "vt.global_cursor_default=0",
+    "systemd.show_status=auto",
+    "rd.systemd.show_status=auto",
+    "plymouth.ignore-serial-consoles",
+):
+    if argument not in arguments:
+        arguments.append(argument)
+path.write_text(" ".join(arguments) + "\n", encoding="utf-8")
+PY
+
+if grep -q '^disable_splash=' "$config"; then
+  sed -i 's/^disable_splash=.*/disable_splash=1/' "$config"
+else
+  printf '\n[all]\ndisable_splash=1\n' >>"$config"
 fi
 
 if grep -q '^/dev/disk/by-slot/system[[:space:]]' "$fstab"; then
@@ -86,3 +114,4 @@ fi
 sync
 printf 'Pinned root filesystem to UUID=%s and boot filesystem to UUID=%s.\n' \
   "$root_uuid" "$boot_uuid"
+printf 'Enabled the quiet Writing Environment boot splash.\n'

@@ -54,18 +54,9 @@ fn apply_presentation_mode(
     window: &tauri::WebviewWindow,
     active: bool,
 ) -> Result<(), tauri::Error> {
-    if active {
-        // A native Wayland fullscreen surface prevents wf-panel-pi's hidden
-        // edge from receiving pointer input. A borderless maximized window is
-        // visually fullscreen while still allowing the overlay panel to rise.
-        window.set_fullscreen(false)?;
-        window.set_decorations(false)?;
-        window.maximize()?;
-    } else {
-        window.set_decorations(true)?;
-        window.unmaximize()?;
-    }
-    Ok(())
+    // The Pi appliance uses a compositor-level Fuzzel overlay instead of a
+    // desktop panel, so the native Wayland surface can now be truly fullscreen.
+    window.set_fullscreen(active)
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -78,7 +69,7 @@ fn apply_presentation_mode(
 
 #[cfg(target_os = "linux")]
 fn presentation_mode_active(window: &tauri::WebviewWindow) -> Result<bool, tauri::Error> {
-    Ok(window.is_maximized()? && !window.is_decorated()?)
+    window.is_fullscreen()
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -93,7 +84,7 @@ fn get_presentation_mode(window: tauri::WebviewWindow) -> Result<bool, String> {
 
 #[tauri::command]
 fn presentation_uses_borderless_window() -> bool {
-    cfg!(target_os = "linux")
+    false
 }
 
 #[tauri::command]

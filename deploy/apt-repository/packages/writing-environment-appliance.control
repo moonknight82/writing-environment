@@ -1,0 +1,11 @@
+Package: writing-environment-appliance
+Version: @PACKAGE_VERSION@
+Architecture: all
+Maintainer: Writing Environment contributors
+Homepage: https://github.com/moonknight82/writing-environment
+Priority: optional
+Section: metapackages
+Depends: writing-environment (>= @APP_VERSION@), writing-environment-shell (= @PACKAGE_VERSION@), writing-environment-boot-theme (= @PACKAGE_VERSION@), writing-environment-repository (= @PACKAGE_VERSION@)
+Description: Complete Writing Environment Raspberry Pi appliance
+ Keeps the application, minimal desktop shell, boot theme, and signed update
+ repository installed as one coherent Raspberry Pi OS appliance.

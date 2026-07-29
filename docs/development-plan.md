@@ -7,7 +7,7 @@ Completed:
 - local-first Markdown projects, sheets, search, History, Trash, autosave, focus controls, goals, themes, and rclone synchronization;
 - macOS, Linux amd64, and Raspberry Pi ARM64 application builds;
 - a minimal Labwc-based Raspberry Pi 4 image tested on the 2 GB model;
-- stable presentation mode, panel access, native spelling support, and clean first-frame rendering on the physical Pi.
+- stable native fullscreen, Super+Space system-drawer access, native spelling support, and clean first-frame rendering on the physical Pi.
 
 The confirmed v0.1 appliance image remains the stable fallback while v0.2 is tested.
 
