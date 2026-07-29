@@ -114,11 +114,11 @@ jobs:
         with:
           releaseId: ${{ needs.prepare-release.outputs.release_id }}
           releaseBody: |
-            Introduces the signed Writing Environment APT repository for Raspberry Pi OS Trixie. The application, minimal Labwc/Fuzzel appliance shell, keyboard defaults, settings integration, and Plymouth boot theme now install as normal Debian packages while the official Raspberry Pi OS repositories remain active.
+            Fixes the Raspberry Pi appliance's Display and Control Centre behavior. Display now opens a dedicated screen-layout window instead of calling a standalone command that Raspberry Pi OS does not ship.
 
-            The Super+Space Updates action upgrades both Raspberry Pi OS and Writing Environment packages through one confirmed apt full-upgrade. Fresh appliance images include the repository key and source from first boot; existing systems can install the repository bootstrap package once and use APT thereafter.
+            The writer remains visually fullscreen, but now uses a borderless maximized Linux window so Control Centre dialogs and other system utilities can appear above it. This prevents settings actions from seeming to freeze when a dialog opens. System-drawer launches are also recorded in ~/.cache/writing-environment/launcher.log for diagnostics.
 
-            The dedicated Raspberry Pi image opens Writing Environment in native fullscreen, removes the persistent panel, prevents blanking during writing sessions, defaults to the US-International cedilla behavior, and displays the quiet Writing Environment splash during boot.
+            The signed APT repository continues to update the application and appliance shell together with Raspberry Pi OS through the Super+Space Updates action. Fresh flashable images include this fix.
 
             Signed desktop release for macOS Apple Silicon, Linux amd64, and Raspberry Pi ARM64.
 
@@ -185,7 +185,14 @@ jobs:
             deploy/pi-image/settings-plugin/bluetooth.c \
             $(pkg-config --libs gtk+-3.0) \
             -o artifacts/apt-plugin/librpcc_writing-environment-bluetooth.so
+          cc -std=c11 -O2 -Wall -Wextra -Werror \
+            $(pkg-config --cflags gtk+-3.0) \
+            deploy/pi-image/settings-plugin/display-settings.c \
+            $(pkg-config --libs gtk+-3.0) -ldl \
+            -o artifacts/apt-plugin/writing-environment-display-settings
           file artifacts/apt-plugin/librpcc_writing-environment-bluetooth.so \
+            | grep -qE 'ELF 64-bit.*(ARM aarch64|aarch64)'
+          file artifacts/apt-plugin/writing-environment-display-settings \
             | grep -qE 'ELF 64-bit.*(ARM aarch64|aarch64)'
       - name: Build appliance packages
         run: |
@@ -193,6 +200,7 @@ jobs:
           scripts/apt/build-packages.sh \
             --app-deb "$app_deb" \
             --settings-plugin artifacts/apt-plugin/librpcc_writing-environment-bluetooth.so \
+            --display-settings artifacts/apt-plugin/writing-environment-display-settings \
             --public-key deploy/apt-repository/writing-environment-archive-keyring.asc \
             --output artifacts/apt-packages
       - name: Build and sign APT repository

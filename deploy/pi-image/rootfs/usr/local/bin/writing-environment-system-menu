@@ -5,6 +5,7 @@ readonly cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/writing-environment"
 readonly update_cache="$cache_dir/update-count"
 readonly update_cache_max_age=21600
 readonly fuzzel_config="/etc/writing-environment/fuzzel.ini"
+readonly launcher_log="$cache_dir/launcher.log"
 
 sanitize_label() {
   tr '\n\r\t' '   ' \
@@ -13,7 +14,15 @@ sanitize_label() {
 }
 
 spawn() {
-  setsid "$@" </dev/null >/dev/null 2>&1 &
+  mkdir -p "$cache_dir"
+  {
+    printf '\n[%s] launching:' "$(date --iso-8601=seconds)"
+    printf ' %q' "$@"
+    printf '\n'
+    setsid "$@"
+    status=$?
+    (( status == 0 )) || printf '[%s] command exited with status %s\n' "$(date --iso-8601=seconds)" "$status"
+  } </dev/null >>"$launcher_log" 2>&1 &
 }
 
 terminal_exec() {
@@ -191,6 +200,15 @@ launch_localsend() {
   fi
 }
 
+launch_display_settings() {
+  if command -v writing-environment-display-settings >/dev/null 2>&1; then
+    spawn writing-environment-display-settings
+  else
+    # Older package sets only expose Screens as a page inside Control Centre.
+    spawn rpcc
+  fi
+}
+
 show_menu() {
   update_cache_is_stale && refresh_update_cache >/dev/null 2>&1 &
 
@@ -226,7 +244,7 @@ show_menu() {
     7) launch_localsend ;;
     8) spawn x-terminal-emulator ;;
     9) spawn rpcc ;;
-    10) spawn raindrop ;;
+    10) launch_display_settings ;;
     11) power_menu ;;
   esac
 }

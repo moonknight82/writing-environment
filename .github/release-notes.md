@@ -1,21 +1,16 @@
-Introduces the signed Writing Environment APT repository for Raspberry Pi OS
-Trixie. The application, minimal Labwc/Fuzzel appliance shell, keyboard
-defaults, settings integration, and Plymouth boot theme now install as normal
-Debian packages while the official Raspberry Pi OS repositories remain active.
+Fixes the Raspberry Pi appliance's Display and Control Centre behavior. Display
+now opens a dedicated screen-layout window instead of calling a standalone
+command that Raspberry Pi OS does not ship.
 
-The Super+Space Updates action now upgrades both Raspberry Pi OS and Writing
-Environment packages through one confirmed `apt full-upgrade`. Fresh appliance
-images include the repository key and source from first boot; existing systems
-can install the repository bootstrap package once and use APT thereafter.
+The writer remains visually fullscreen, but now uses a borderless maximized
+Linux window so Control Centre dialogs and other system utilities can appear
+above it. This prevents settings actions from seeming to freeze when a dialog
+opens. System-drawer launches are also recorded in
+`~/.cache/writing-environment/launcher.log` for diagnostics.
 
-The dedicated Raspberry Pi image now opens Writing Environment in native
-fullscreen, removes the persistent panel, keeps the Fuzzel status drawer and
-Control Centre available, prevents blanking during writing sessions, defaults
-to the US-International cedilla behavior, and displays the quiet Writing
-Environment splash during boot.
-
-Rust builds performed directly on a 2 GB Raspberry Pi are limited to one Cargo
-job by default to avoid out-of-memory kills.
+The signed APT repository continues to update the application and appliance
+shell together with Raspberry Pi OS through the Super+Space Updates action.
+Fresh flashable images include this fix.
 
 Signed desktop release for macOS Apple Silicon, Linux amd64, and Raspberry Pi
 ARM64.

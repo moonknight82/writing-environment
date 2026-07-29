@@ -57,7 +57,7 @@ These are engineering targets and may be tightened after measurement on the phys
 - Raspberry Pi OS Lite (Debian Trixie, ARM64) base
 - Minimal Raspberry Pi Labwc desktop, with no general-purpose application bundles
 - PiXonyx Dark Mode by default and PiXtrix Light Mode available through Appearance Settings
-- Automatic graphical login and native-fullscreen writer launch
+- Automatic graphical login and borderless maximized writer launch
 - Essential escape hatches: Files, Terminal, network, Bluetooth, audio, removable media, updater, power, and system preferences
 
 ## Deferred work

@@ -66,6 +66,7 @@ docker run --rm --platform linux/arm64 \
   /workspace/scripts/apt/build-packages.sh \
     --app-deb "/app/$(basename "$app_deb")" \
     --settings-plugin /plugin/librpcc_writing-environment-bluetooth.so \
+    --display-settings /plugin/writing-environment-display-settings \
     --public-key /workspace/deploy/apt-repository/writing-environment-archive-keyring.asc \
     --output /output/packages
 

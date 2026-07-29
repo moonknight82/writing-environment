@@ -4,7 +4,7 @@ Writing Environment can be packaged as a complete, flashable Raspberry Pi 4 imag
 
 ## What the desktop looks like
 
-The first boot lands directly in Writing Environment's native-fullscreen presentation view. PiXonyx Dark Mode is the default across the writer, GTK utilities, and the system drawer. Press `Super+Space` to open the Fuzzel drawer above the fullscreen writer. Press `Ctrl+Super+S` to open **Control Centre** directly. Use F11 or the toolbar's presentation button to return to a normal resizable window.
+The first boot lands directly in Writing Environment's borderless maximized presentation view. It looks fullscreen while allowing GTK utilities and Control Centre dialogs to rise normally. PiXonyx Dark Mode is the default across the writer, GTK utilities, and the system drawer. Press `Super+Space` to open the Fuzzel drawer above the writer. Press `Ctrl+Super+S` to open **Control Centre** directly. Use F11 or the toolbar's presentation button to return to a normal resizable window.
 
 The drawer is intentionally curated rather than a general Linux application list. Its first four rows report a fresh Wi-Fi snapshot, a fresh Bluetooth snapshot, the cached number of available package updates, and Raspberry Pi power/thermal health. Selecting a status row opens its manager or details. The remaining entries open Writing Environment, Files, Browser, LocalSend, Terminal, Control Centre, display settings, and confirmed recovery/power actions. The update count is refreshed in the background so opening the drawer never waits for APT.
 

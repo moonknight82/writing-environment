@@ -1,6 +1,6 @@
 # Optional Raspberry Pi session overrides.
 #
-# The default starts Writing Environment in native fullscreen presentation
+# The default starts Writing Environment in borderless maximized presentation
 # mode. On the appliance image, Super+Space opens the system drawer and
 # Ctrl+Super+S opens Control Centre. Set this to 0 for a normal window.
 # WRITING_ENVIRONMENT_APPLIANCE=0

@@ -35,7 +35,7 @@ The script:
 6. installs a launcher, application-menu entry, and scalable icon;
 7. adds one marked launch command to the user's Labwc autostart file.
 
-The application opens in native fullscreen presentation mode at the next graphical login. It is not a locked kiosk: F11 returns it to a normal resizable window, while `Alt+F4`, Terminal, and the Raspberry Pi desktop remain available for recovery and diagnostics. Writing Environment's own distraction-free control can hide its sidebars while writing. The dedicated appliance image additionally provides its `Super+Space` system drawer.
+The application opens in a borderless maximized presentation mode at the next graphical login. It looks fullscreen while allowing system settings windows and dialogs to appear above it. It is not a locked kiosk: F11 returns it to a normal resizable window, while `Alt+F4`, Terminal, and the Raspberry Pi desktop remain available for recovery and diagnostics. Writing Environment's own distraction-free control can hide its sidebars while writing. The dedicated appliance image additionally provides its `Super+Space` system drawer.
 
 Useful installation variants:
 

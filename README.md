@@ -66,7 +66,7 @@ Version 0.5.0 introduces one-way document export for the current in-memory sheet
 
 Version 0.5.1 completes the export milestone with selected-folder and complete-project assembly. Writers can choose alphabetical or creation-date ordering, a title page, section page breaks, title/author/language metadata, and reusable export presets. All three formats omit YAML front matter, avoid duplicating matching opening titles, and write atomically beside the chosen destination.
 
-Version 0.5.2 adds a signed APT repository for the Raspberry Pi appliance. The application, Fuzzel/Labwc shell, keyboard defaults, settings integration, and Plymouth theme are normal Debian packages. The official Raspberry Pi OS repositories remain enabled, so the system drawer's confirmed update action upgrades the base OS and Writing Environment together.
+Version 0.5.3 keeps the writer visually fullscreen while allowing Raspberry Pi settings windows and dialogs to rise normally, and adds a dedicated Display Settings launcher. The signed APT repository introduced in 0.5.2 updates the application, Fuzzel/Labwc shell, keyboard defaults, settings integration, and Plymouth theme alongside the normal Raspberry Pi OS packages.
 
 Update artifacts and `latest.json` are published through [GitHub Releases](https://github.com/moonknight82/writing-environment/releases). Every application update is verified with Tauri's embedded public signing key before installation. The private key is held only in the repository's GitHub Actions secrets. macOS uses a signed Tauri application archive; Linux amd64 and Raspberry Pi use signed Debian packages and request system authorization when installation begins.
 
@@ -137,7 +137,7 @@ The Mac build now exports both the manual archive and the ARM64 application `.de
 scripts/pi-image/build-on-mac.sh
 ```
 
-The image boots directly into Writing Environment in native fullscreen mode. Press `Super+Space` to open a curated Fuzzel system drawer above the writer; it reports current Wi-Fi, Bluetooth, update, and Pi power status and provides Files, Terminal, Browser, LocalSend, settings, display, restart, and shutdown actions. F11 or the presentation toolbar button returns to a normal window. Labwc remains the lightweight compositor, while the persistent desktop panel and desktop icons are not started. Raspberry Pi Control Centre provides the native configuration tools, and advanced administration remains available through `sudo raspi-config`. See the [dedicated Pi image guide](docs/pi-image.md).
+The image boots directly into Writing Environment in a borderless maximized presentation view. Press `Super+Space` to open a curated Fuzzel system drawer above the writer; it reports current Wi-Fi, Bluetooth, update, and Pi power status and provides Files, Terminal, Browser, LocalSend, settings, display, restart, and shutdown actions. F11 or the presentation toolbar button returns to a normal window. Labwc remains the lightweight compositor, while the persistent desktop panel and desktop icons are not started. Raspberry Pi Control Centre provides the native configuration tools, and advanced administration remains available through `sudo raspi-config`. See the [dedicated Pi image guide](docs/pi-image.md).
 
 The public APT repository is served from `https://moonknight82.github.io/writing-environment/apt`. Its source file is additive: Debian and Raspberry Pi repositories remain responsible for the operating system, kernel, firmware, and ordinary packages.
 

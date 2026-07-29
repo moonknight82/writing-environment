@@ -9,7 +9,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
-COPY bluetooth.c ./
+COPY bluetooth.c display-settings.c ./
 
 RUN mkdir -p /out \
   && cc \
@@ -23,7 +23,18 @@ RUN mkdir -p /out \
     $(pkg-config --cflags gtk+-3.0) \
     bluetooth.c \
     -o /out/librpcc_writing-environment-bluetooth.so \
-    $(pkg-config --libs gtk+-3.0)
+    $(pkg-config --libs gtk+-3.0) \
+  && cc \
+    -std=c11 \
+    -O2 \
+    -Wall \
+    -Wextra \
+    -Werror \
+    $(pkg-config --cflags gtk+-3.0) \
+    display-settings.c \
+    -o /out/writing-environment-display-settings \
+    $(pkg-config --libs gtk+-3.0) \
+    -ldl
 
 FROM scratch AS export
 COPY --from=build /out/ /

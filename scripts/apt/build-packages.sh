@@ -7,6 +7,7 @@ readonly templates="$repo_root/deploy/apt-repository/packages"
 
 app_deb=""
 settings_plugin=""
+display_settings=""
 public_key=""
 output=""
 revision="1"
@@ -20,6 +21,7 @@ Build the Writing Environment appliance Debian packages.
 Required options:
   --app-deb FILE          Tauri writing-environment ARM64 Debian package
   --settings-plugin FILE  ARM64 Raspberry Pi Control Centre plugin
+  --display-settings FILE ARM64 standalone Display Settings launcher
   --public-key FILE       ASCII-armored APT repository public key
   --output DIRECTORY      New output directory for all Debian packages
 
@@ -32,6 +34,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --app-deb) app_deb="${2:-}"; shift 2 ;;
     --settings-plugin) settings_plugin="${2:-}"; shift 2 ;;
+    --display-settings) display_settings="${2:-}"; shift 2 ;;
     --public-key) public_key="${2:-}"; shift 2 ;;
     --output) output="${2:-}"; shift 2 ;;
     --revision) revision="${2:-}"; shift 2 ;;
@@ -42,6 +45,7 @@ done
 
 [[ -f "$app_deb" ]] || { printf 'Application Debian package not found: %s\n' "$app_deb" >&2; exit 1; }
 [[ -f "$settings_plugin" ]] || { printf 'Settings plugin not found: %s\n' "$settings_plugin" >&2; exit 1; }
+[[ -f "$display_settings" ]] || { printf 'Display Settings launcher not found: %s\n' "$display_settings" >&2; exit 1; }
 [[ -f "$public_key" ]] || { printf 'APT public key not found: %s\n' "$public_key" >&2; exit 1; }
 [[ -n "$output" ]] || { printf -- '--output is required.\n' >&2; exit 2; }
 [[ "$revision" =~ ^[1-9][0-9]*$ ]] || { printf 'Invalid Debian revision: %s\n' "$revision" >&2; exit 2; }
@@ -65,6 +69,10 @@ app_architecture="$(dpkg-deb -f "$app_deb" Architecture)"
 }
 file "$settings_plugin" | grep -qE 'ELF 64-bit.*(ARM aarch64|aarch64)' || {
   printf 'The settings plugin is not Linux ARM64.\n' >&2
+  exit 1
+}
+file "$display_settings" | grep -qE 'ELF 64-bit.*(ARM aarch64|aarch64)' || {
+  printf 'The Display Settings launcher is not Linux ARM64.\n' >&2
   exit 1
 }
 
@@ -113,6 +121,7 @@ install -m 0755 "$repo_root/deploy/pi-image/rootfs/usr/local/bin/writing-environ
 install -m 0755 "$repo_root/deploy/pi-image/rootfs/usr/local/bin/writing-environment-session-setup" "$shell_root/usr/local/bin/writing-environment-session-setup"
 install -m 0755 "$repo_root/deploy/pi-image/rootfs/usr/local/bin/writing-environment-system-menu" "$shell_root/usr/local/bin/writing-environment-system-menu"
 install -m 0755 "$repo_root/deploy/pi-image/rootfs/usr/local/bin/writing-environment-update" "$shell_root/usr/local/bin/writing-environment-update"
+install -m 0755 "$display_settings" "$shell_root/usr/local/bin/writing-environment-display-settings"
 install -m 0644 "$repo_root/deploy/pi/writing-environment.desktop" "$shell_root/usr/local/share/applications/writing-environment.desktop"
 install -m 0644 "$repo_root/deploy/pi-image/rootfs/usr/local/share/applications/writing-environment-browser.desktop" "$shell_root/usr/local/share/applications/writing-environment-browser.desktop"
 install -m 0644 "$repo_root/design/app-icon.svg" "$shell_root/usr/local/share/icons/hicolor/scalable/apps/writing-environment.svg"

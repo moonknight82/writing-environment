@@ -54,9 +54,19 @@ fn apply_presentation_mode(
     window: &tauri::WebviewWindow,
     active: bool,
 ) -> Result<(), tauri::Error> {
-    // The Pi appliance uses a compositor-level Fuzzel overlay instead of a
-    // desktop panel, so the native Wayland surface can now be truly fullscreen.
-    window.set_fullscreen(active)
+    if active {
+        // Keep the appliance visually fullscreen without creating a native
+        // Wayland fullscreen surface. Raspberry Pi settings tools open normal
+        // GTK windows and modal dialogs, which must be able to rise above the
+        // writer rather than appearing to hang behind it.
+        window.set_fullscreen(false)?;
+        window.set_decorations(false)?;
+        window.maximize()?;
+    } else {
+        window.set_decorations(true)?;
+        window.unmaximize()?;
+    }
+    Ok(())
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -69,7 +79,7 @@ fn apply_presentation_mode(
 
 #[cfg(target_os = "linux")]
 fn presentation_mode_active(window: &tauri::WebviewWindow) -> Result<bool, tauri::Error> {
-    window.is_fullscreen()
+    Ok(window.is_maximized()? && !window.is_decorated()?)
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -84,7 +94,7 @@ fn get_presentation_mode(window: tauri::WebviewWindow) -> Result<bool, String> {
 
 #[tauri::command]
 fn presentation_uses_borderless_window() -> bool {
-    false
+    cfg!(target_os = "linux")
 }
 
 #[tauri::command]

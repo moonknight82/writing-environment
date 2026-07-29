@@ -11,8 +11,8 @@ usage() {
   cat <<'EOF'
 Usage: scripts/pi-image/build-settings-plugin.sh --output DIRECTORY
 
-Build the Writing Environment Raspberry Pi Control Centre Bluetooth plugin as
-a Linux ARM64 shared library using Docker Desktop.
+Build the Writing Environment Raspberry Pi Control Centre Bluetooth plugin and
+standalone Display Settings launcher for Linux ARM64 using Docker Desktop.
 EOF
 }
 
@@ -44,9 +44,15 @@ docker build \
   "$plugin_context"
 
 plugin="$output/librpcc_writing-environment-bluetooth.so"
+display_settings="$output/writing-environment-display-settings"
 [[ -f "$plugin" ]] || { printf 'The plugin build produced no shared library.\n' >&2; exit 1; }
+[[ -f "$display_settings" ]] || { printf 'The integration build produced no Display Settings launcher.\n' >&2; exit 1; }
 file "$plugin" | grep -qE 'ELF 64-bit.*(ARM aarch64|aarch64)' || {
   printf 'The built plugin is not Linux ARM64.\n' >&2
   exit 1
 }
-printf 'Built Raspberry Pi Control Centre plugin:\n%s\n' "$plugin"
+file "$display_settings" | grep -qE 'ELF 64-bit.*(ARM aarch64|aarch64)' || {
+  printf 'The Display Settings launcher is not Linux ARM64.\n' >&2
+  exit 1
+}
+printf 'Built Raspberry Pi Control Centre integrations:\n%s\n%s\n' "$plugin" "$display_settings"
