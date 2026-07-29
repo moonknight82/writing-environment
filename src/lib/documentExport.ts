@@ -4,28 +4,42 @@ import { save } from "@tauri-apps/plugin-dialog";
 export type ExportFormat = "docx" | "pdf" | "epub";
 
 interface ExportDefinition {
-  command: string;
-  dialogTitle: string;
+  label: string;
   filterName: string;
 }
 
 const exportDefinitions: Record<ExportFormat, ExportDefinition> = {
   docx: {
-    command: "export_sheet_docx",
-    dialogTitle: "Export current sheet as a Word document",
+    label: "Word document",
     filterName: "Word document",
   },
   pdf: {
-    command: "export_sheet_pdf",
-    dialogTitle: "Export current sheet as a PDF",
+    label: "PDF",
     filterName: "PDF document",
   },
   epub: {
-    command: "export_sheet_epub",
-    dialogTitle: "Export current sheet as an ebook",
+    label: "EPUB",
     filterName: "EPUB ebook",
   },
 };
+
+export interface ExportSection {
+  relativePath: string;
+  title: string;
+}
+
+export interface DocumentExportRequest {
+  format: ExportFormat;
+  root: string;
+  title: string;
+  sections: ExportSection[];
+  activeRelativePath: string | null;
+  activeContent: string | null;
+  titlePage: boolean;
+  pageBreaks: boolean;
+  author: string;
+  language: string;
+}
 
 function exportFileName(title: string, extension: ExportFormat): string {
   const safeTitle = Array.from(title.trim())
@@ -38,21 +52,19 @@ function exportFileName(title: string, extension: ExportFormat): string {
   return `${safeTitle || "Untitled"}.${extension}`;
 }
 
-export async function exportSheet(
-  format: ExportFormat,
-  title: string,
-  content: string,
+export async function exportDocument(
+  request: DocumentExportRequest,
 ): Promise<string | null> {
-  const definition = exportDefinitions[format];
+  const definition = exportDefinitions[request.format];
   const selection = await save({
-    title: definition.dialogTitle,
-    defaultPath: exportFileName(title, format),
-    filters: [{ name: definition.filterName, extensions: [format] }],
+    title: `Export ${request.title} as ${definition.label}`,
+    defaultPath: exportFileName(request.title, request.format),
+    filters: [{ name: definition.filterName, extensions: [request.format] }],
   });
   if (!selection) return null;
 
-  const path = selection.toLowerCase().endsWith(`.${format}`)
+  const path = selection.toLowerCase().endsWith(`.${request.format}`)
     ? selection
-    : `${selection}.${format}`;
-  return invoke<string>(definition.command, { path, title, content });
+    : `${selection}.${request.format}`;
+  return invoke<string>("export_document", { request: { path, ...request } });
 }

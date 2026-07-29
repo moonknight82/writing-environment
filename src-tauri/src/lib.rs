@@ -383,6 +383,104 @@ async fn export_sheet_epub(path: String, title: String, content: String) -> Resu
     .map_err(|error| format!("The background export worker stopped unexpectedly: {error}"))?
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportSectionInput {
+    relative_path: String,
+    title: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportDocumentInput {
+    path: String,
+    format: String,
+    root: String,
+    title: String,
+    sections: Vec<ExportSectionInput>,
+    active_relative_path: Option<String>,
+    active_content: Option<String>,
+    title_page: bool,
+    page_breaks: bool,
+    author: String,
+    language: String,
+}
+
+#[tauri::command]
+async fn export_document(request: ExportDocumentInput) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let ExportDocumentInput {
+            path,
+            format,
+            root,
+            title,
+            sections,
+            active_relative_path,
+            active_content,
+            title_page,
+            page_breaks,
+            author,
+            language,
+        } = request;
+        if sections.is_empty() {
+            return Err("Choose at least one sheet to export.".to_string());
+        }
+        let mut seen = HashSet::new();
+        let mut export_sections = Vec::with_capacity(sections.len());
+        for section in sections {
+            if !seen.insert(section.relative_path.clone()) {
+                return Err(format!(
+                    "The export contains the same sheet more than once: {}",
+                    section.relative_path
+                ));
+            }
+            let content = if active_relative_path.as_deref() == Some(&section.relative_path) {
+                active_content.clone().ok_or_else(|| {
+                    "The active sheet content was unavailable for export.".to_string()
+                })?
+            } else {
+                let target = resolve_existing_sheet(&root, &section.relative_path)?;
+                read_markdown_utf8(&target, Path::new(&section.relative_path))?
+            };
+            export_sections.push(document_export::ExportSection {
+                title: section.title,
+                markdown: content,
+            });
+        }
+        let options = document_export::ExportOptions {
+            title_page,
+            page_breaks,
+        };
+        let metadata = document_export::ExportMetadata { author, language };
+        match format.as_str() {
+            "docx" => document_export::export_document_docx(
+                &path,
+                &title,
+                &export_sections,
+                options,
+                &metadata,
+            ),
+            "pdf" => document_export::export_document_pdf(
+                &path,
+                &title,
+                &export_sections,
+                options,
+                &metadata,
+            ),
+            "epub" => document_export::export_document_epub(
+                &path,
+                &title,
+                &export_sections,
+                options,
+                &metadata,
+            ),
+            _ => Err("Choose DOCX, PDF, or EPUB as the export format.".into()),
+        }
+    })
+    .await
+    .map_err(|error| format!("The background export worker stopped unexpectedly: {error}"))?
+}
+
 #[tauri::command]
 async fn save_sheet(
     app: tauri::AppHandle,
@@ -2040,6 +2138,7 @@ pub fn run() {
             export_sheet_docx,
             export_sheet_pdf,
             export_sheet_epub,
+            export_document,
             save_sheet,
             preserve_local_conflict,
             list_sheet_revisions,

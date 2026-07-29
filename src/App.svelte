@@ -43,7 +43,7 @@
     type SyncAvailability,
   } from "./lib/sync";
   import { applyTheme, themes } from "./lib/themes";
-  import { exportSheet, type ExportFormat } from "./lib/documentExport";
+  import { exportDocument, type ExportFormat } from "./lib/documentExport";
 
   interface FolderSummary {
     path: string;
@@ -62,8 +62,21 @@
     lastSheetPath: string | null;
   }
 
+  interface ExportPreset {
+    id: string;
+    name: string;
+    scope: ExportScope;
+    title: string;
+    author: string;
+    language: string;
+    sort: SheetSort;
+    titlePage: boolean;
+    pageBreaks: boolean;
+  }
+
   type WritingFocusMode = "off" | "paragraph" | "sentence";
   type SheetSort = "created-desc" | "created-asc" | "title-asc" | "title-desc";
+  type ExportScope = "sheet" | "folder" | "project";
 
   type SheetDialogMode = "create" | "rename" | "move" | "trash";
 
@@ -114,6 +127,9 @@
   const UPDATE_CHECK_INTERVAL = 24 * 60 * 60 * 1000;
   const AUTOSAVE_IDLE_DELAY = 1200;
   const LOCAL_SAVE_REFRESH_DELAY = 1600;
+  const EXPORT_PRESETS_KEY = "writing-environment.export-presets";
+  const EXPORT_AUTHOR_KEY = "writing-environment.export-author";
+  const EXPORT_LANGUAGE_KEY = "writing-environment.export-language";
 
   const prototypeSheets: SheetSummary[] = [
     {
@@ -304,6 +320,21 @@ It passed the abandoned signal house before descending between black pines to th
   let historyRestoring = false;
   let exportRunning = false;
   let exportMenuVisible = false;
+  let exportScope: ExportScope = "sheet";
+  let exportSort: SheetSort = "created-asc";
+  let exportTitlePage = true;
+  let exportPageBreaks = true;
+  let exportSelectedCount = 1;
+  let exportSummary = "The open sheet";
+  let currentExportTitle = "Untitled";
+  let exportTitle = "";
+  let exportAuthor = "";
+  let exportLanguage = "und";
+  let exportPresets: ExportPreset[] = [];
+  let selectedExportPresetId = "";
+  let exportPresetEditorVisible = false;
+  let exportPresetName = "";
+  let exportPresetError = "";
   let historyRevisions: RevisionSummary[] = [];
   let selectedRevisionId: string | null = null;
   let selectedRevision: RevisionSummary | undefined;
@@ -321,7 +352,7 @@ It passed the abandoned signal house before descending between black pines to th
   let externalConflictPath: string | null = null;
   let externalDiskContent: string | null = null;
   let resolvingExternalConflict = false;
-  let appVersion = "0.5.0";
+  let appVersion = "0.5.1";
   let automaticUpdateChecks = true;
   let updateVisible = false;
   let updateChecking = false;
@@ -358,6 +389,25 @@ It passed the abandoned signal house before descending between black pines to th
     (target) => target.included && !target.initialized,
   );
   $: selectedRevision = historyRevisions.find((revision) => revision.id === selectedRevisionId);
+  $: if (exportScope === "folder" && (activeGroup === "All Sheets" || activeGroup === "Inbox")) {
+    exportScope = "project";
+    exportTitlePage = true;
+  }
+  $: exportSelectedCount = exportScope === "sheet"
+    ? Number(Boolean(activeSheetPath))
+    : exportScope === "folder" && activeGroup !== "All Sheets" && activeGroup !== "Inbox"
+      ? sheets.filter((sheet) => sheetIsInFolder(sheet, activeGroup)).length
+      : sheets.length;
+  $: exportSummary = exportScope === "sheet"
+    ? "The open sheet"
+    : exportScope === "folder"
+      ? `${exportSelectedCount} ${exportSelectedCount === 1 ? "sheet" : "sheets"} in this folder`
+      : `${exportSelectedCount} ${exportSelectedCount === 1 ? "sheet" : "sheets"} in ${inboxActive ? "Inbox" : "this project"}`;
+  $: currentExportTitle = exportScope === "sheet"
+    ? activeSheet
+    : exportScope === "folder" && activeGroup !== "All Sheets" && activeGroup !== "Inbox"
+      ? activeGroup.split("/").at(-1) || activeGroup
+      : libraryName;
 
   onMount(() => {
     const savedTheme = localStorage.getItem("writing-environment.theme");
@@ -380,6 +430,10 @@ It passed the abandoned signal house before descending between black pines to th
     const storedSheetSort = localStorage.getItem("writing-environment.sheet-sort");
     const storedAutomaticUpdateChecks = localStorage.getItem("writing-environment.automatic-update-checks");
     const selected = themes.find((theme) => theme.id === savedTheme) ?? themes[0];
+
+    exportAuthor = localStorage.getItem(EXPORT_AUTHOR_KEY) ?? "";
+    exportLanguage = normalizedExportLanguage(localStorage.getItem(EXPORT_LANGUAGE_KEY));
+    exportPresets = loadExportPresets();
 
     activeThemeId = selected.id;
     applyTheme(selected);
@@ -1980,19 +2034,198 @@ It passed the abandoned signal house before descending between black pines to th
     }
   }
 
-  async function exportCurrentSheet(format: ExportFormat): Promise<void> {
+  function selectExportScope(scope: ExportScope): void {
+    exportScope = scope;
+    exportTitlePage = scope !== "sheet";
+    exportTitle = "";
+    selectedExportPresetId = "";
+  }
+
+  function normalizedExportLanguage(value: string | null): string {
+    return ["und", "en", "en-US", "en-GB", "pt-BR", "pt-PT", "es", "fr", "de", "it"]
+      .includes(value ?? "")
+      ? value as string
+      : "und";
+  }
+
+  function isExportScope(value: unknown): value is ExportScope {
+    return value === "sheet" || value === "folder" || value === "project";
+  }
+
+  function loadExportPresets(): ExportPreset[] {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(EXPORT_PRESETS_KEY) ?? "[]") as unknown;
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter((item): item is ExportPreset => {
+        if (!item || typeof item !== "object") return false;
+        const preset = item as Partial<ExportPreset>;
+        return typeof preset.id === "string"
+          && typeof preset.name === "string"
+          && isExportScope(preset.scope)
+          && typeof preset.title === "string"
+          && typeof preset.author === "string"
+          && typeof preset.language === "string"
+          && isSheetSort(preset.sort ?? null)
+          && typeof preset.titlePage === "boolean"
+          && typeof preset.pageBreaks === "boolean";
+      }).slice(0, 20);
+    } catch {
+      return [];
+    }
+  }
+
+  function storeExportPresets(): void {
+    localStorage.setItem(EXPORT_PRESETS_KEY, JSON.stringify(exportPresets));
+  }
+
+  function setExportTitle(value: string): void {
+    exportTitle = value;
+    selectedExportPresetId = "";
+  }
+
+  function setExportAuthor(value: string): void {
+    exportAuthor = value.slice(0, 160);
+    localStorage.setItem(EXPORT_AUTHOR_KEY, exportAuthor);
+    selectedExportPresetId = "";
+  }
+
+  function setExportLanguage(value: string): void {
+    exportLanguage = normalizedExportLanguage(value);
+    localStorage.setItem(EXPORT_LANGUAGE_KEY, exportLanguage);
+    selectedExportPresetId = "";
+  }
+
+  function setExportSort(value: SheetSort): void {
+    exportSort = value;
+    selectedExportPresetId = "";
+  }
+
+  function setExportTitlePage(value: boolean): void {
+    exportTitlePage = value;
+    selectedExportPresetId = "";
+  }
+
+  function setExportPageBreaks(value: boolean): void {
+    exportPageBreaks = value;
+    selectedExportPresetId = "";
+  }
+
+  function beginSaveExportPreset(): void {
+    exportPresetName = "";
+    exportPresetError = "";
+    exportPresetEditorVisible = true;
+  }
+
+  function saveExportPreset(): void {
+    const name = exportPresetName.trim();
+    if (!name) {
+      exportPresetError = "Give this preset a name.";
+      return;
+    }
+    const preset: ExportPreset = {
+      id: globalThis.crypto?.randomUUID?.() ?? `export-${Date.now().toString(36)}`,
+      name: name.slice(0, 60),
+      scope: exportScope,
+      title: exportTitle.trim(),
+      author: exportAuthor.trim(),
+      language: exportLanguage,
+      sort: exportSort,
+      titlePage: exportTitlePage,
+      pageBreaks: exportPageBreaks,
+    };
+    exportPresets = [...exportPresets, preset].slice(-20);
+    selectedExportPresetId = preset.id;
+    storeExportPresets();
+    exportPresetEditorVisible = false;
+    exportPresetName = "";
+    exportPresetError = "";
+  }
+
+  function applyExportPreset(id: string): void {
+    const preset = exportPresets.find((item) => item.id === id);
+    if (!preset) {
+      selectedExportPresetId = "";
+      return;
+    }
+    const presetScope = preset.scope === "folder" && (activeGroup === "All Sheets" || activeGroup === "Inbox")
+      ? "project"
+      : preset.scope;
+    exportScope = presetScope;
+    selectedExportPresetId = presetScope === preset.scope ? id : "";
+    exportTitle = preset.title;
+    exportAuthor = preset.author;
+    exportLanguage = normalizedExportLanguage(preset.language);
+    exportSort = preset.sort;
+    exportTitlePage = preset.titlePage;
+    exportPageBreaks = preset.pageBreaks;
+    localStorage.setItem(EXPORT_AUTHOR_KEY, exportAuthor);
+    localStorage.setItem(EXPORT_LANGUAGE_KEY, exportLanguage);
+    exportPresetEditorVisible = false;
+    exportPresetError = "";
+  }
+
+  function deleteSelectedExportPreset(): void {
+    if (!selectedExportPresetId) return;
+    exportPresets = exportPresets.filter((preset) => preset.id !== selectedExportPresetId);
+    selectedExportPresetId = "";
+    storeExportPresets();
+  }
+
+  function exportScopeSheets(): SheetSummary[] {
+    if (!activeSheetPath) return [];
+    if (exportScope === "sheet") {
+      const active = sheets.find((sheet) => sheet.relativePath === activeSheetPath);
+      return active ? [active] : [];
+    }
+    const source = exportScope === "folder"
+      && activeGroup !== "All Sheets"
+      && activeGroup !== "Inbox"
+      ? sheets.filter((sheet) => sheetIsInFolder(sheet, activeGroup))
+      : sheets;
+    return sortSheets(source, exportSort);
+  }
+
+  function exportDocumentTitle(): string {
+    if (exportTitle.trim()) return exportTitle.trim();
+    if (exportScope === "sheet") return activeSheet;
+    if (exportScope === "folder" && activeGroup !== "All Sheets" && activeGroup !== "Inbox") {
+      return activeGroup.split("/").at(-1) || activeGroup;
+    }
+    return libraryName;
+  }
+
+  async function exportSelection(format: ExportFormat): Promise<void> {
     if (!desktopAvailable() || !libraryPath || !activeSheetPath || trashActive || exportRunning) {
       return;
     }
-    closeToolbarMenus();
+    const selectedSheets = exportScopeSheets();
+    if (selectedSheets.length === 0) {
+      errorMessage = "There are no sheets in this export selection.";
+      return;
+    }
     exportRunning = true;
     try {
-      const destination = await exportSheet(format, activeSheet, content);
+      const destination = await exportDocument({
+        format,
+        root: libraryPath,
+        title: exportDocumentTitle(),
+        sections: selectedSheets.map((sheet) => ({
+          relativePath: sheet.relativePath,
+          title: sheet.title,
+        })),
+        activeRelativePath: activeSheetPath,
+        activeContent: content,
+        titlePage: exportScope !== "sheet" && exportTitlePage,
+        pageBreaks: exportScope !== "sheet" && exportPageBreaks,
+        author: exportAuthor.trim(),
+        language: exportLanguage,
+      });
       if (!destination) return;
       errorMessage = "";
       saveStatus = `Exported ${format.toUpperCase()}`;
+      exportMenuVisible = false;
     } catch (error) {
-      errorMessage = `Cannot export this sheet: ${errorText(error)}`;
+      errorMessage = `Cannot export this document: ${errorText(error)}`;
     } finally {
       exportRunning = false;
     }
@@ -3102,10 +3335,10 @@ It passed the abandoned signal house before descending between black pines to th
             class:active={exportMenuVisible}
             class="export-button"
             disabled={!desktopAvailable() || !libraryPath || !activeSheetPath || trashActive || exportRunning}
-            aria-label="Export current sheet"
+            aria-label="Export document"
             aria-haspopup="menu"
             aria-expanded={exportMenuVisible}
-            title="Export current sheet"
+            title="Export document"
             onclick={() => {
               exportMenuVisible = !exportMenuVisible;
               syncMenuVisible = false;
@@ -3119,17 +3352,155 @@ It passed the abandoned signal house before descending between black pines to th
             <span>{exportRunning ? "Exporting…" : "Export"}</span>
           </button>
           {#if exportMenuVisible}
-            <div class="export-menu" role="menu" aria-label="Export current sheet">
-              <p class="eyebrow">EXPORT SHEET</p>
-              <button role="menuitem" onclick={() => void exportCurrentSheet("docx")}>
+            <div class="export-menu" aria-label="Export document">
+              <p class="eyebrow">EXPORT</p>
+              <div class="export-scope" aria-label="Export scope">
+                <button
+                  class:active={exportScope === "sheet"}
+                  aria-pressed={exportScope === "sheet"}
+                  onclick={() => selectExportScope("sheet")}
+                >Sheet</button>
+                <button
+                  class:active={exportScope === "folder"}
+                  disabled={activeGroup === "All Sheets" || activeGroup === "Inbox"}
+                  aria-pressed={exportScope === "folder"}
+                  title={activeGroup === "All Sheets" || activeGroup === "Inbox" ? "Choose a project folder first" : activeGroup}
+                  onclick={() => selectExportScope("folder")}
+                >Folder</button>
+                <button
+                  class:active={exportScope === "project"}
+                  aria-pressed={exportScope === "project"}
+                  onclick={() => selectExportScope("project")}
+                >{inboxActive ? "Inbox" : "Project"}</button>
+              </div>
+
+              <div class="export-preset-row">
+                <label>
+                  <span>Preset</span>
+                  <select
+                    aria-label="Export preset"
+                    value={selectedExportPresetId}
+                    onchange={(event) => applyExportPreset(event.currentTarget.value)}
+                  >
+                    <option value="">Custom</option>
+                    {#each exportPresets as preset}
+                      <option value={preset.id}>{preset.name}</option>
+                    {/each}
+                  </select>
+                </label>
+                <button class="export-small-button" onclick={beginSaveExportPreset}>Save…</button>
+                {#if selectedExportPresetId}
+                  <button
+                    class="export-delete-preset"
+                    aria-label="Delete selected export preset"
+                    title="Delete preset"
+                    onclick={deleteSelectedExportPreset}
+                  >×</button>
+                {/if}
+              </div>
+              {#if exportPresetEditorVisible}
+                <div class="export-preset-editor">
+                  <input
+                    aria-label="Preset name"
+                    placeholder="Preset name"
+                    maxlength="60"
+                    value={exportPresetName}
+                    oninput={(event) => {
+                      exportPresetName = event.currentTarget.value;
+                      exportPresetError = "";
+                    }}
+                    onkeydown={(event) => {
+                      if (event.key === "Enter") saveExportPreset();
+                      if (event.key === "Escape") exportPresetEditorVisible = false;
+                    }}
+                  />
+                  <button onclick={saveExportPreset}>Save</button>
+                  <button onclick={() => (exportPresetEditorVisible = false)}>Cancel</button>
+                  {#if exportPresetError}<small>{exportPresetError}</small>{/if}
+                </div>
+              {/if}
+
+              <p class="export-summary">{exportSummary}</p>
+
+              <div class="export-metadata">
+                <label>
+                  <span>Title</span>
+                  <input
+                    aria-label="Export title"
+                    maxlength="160"
+                    value={exportTitle || currentExportTitle}
+                    oninput={(event) => setExportTitle(event.currentTarget.value)}
+                  />
+                </label>
+                <label>
+                  <span>Author</span>
+                  <input
+                    aria-label="Export author"
+                    maxlength="160"
+                    placeholder="Optional"
+                    value={exportAuthor}
+                    oninput={(event) => setExportAuthor(event.currentTarget.value)}
+                  />
+                </label>
+                <label>
+                  <span>Language</span>
+                  <select
+                    aria-label="Export language"
+                    value={exportLanguage}
+                    onchange={(event) => setExportLanguage(event.currentTarget.value)}
+                  >
+                    <option value="und">Not specified</option>
+                    <option value="en">English</option>
+                    <option value="en-US">English (US)</option>
+                    <option value="en-GB">English (UK)</option>
+                    <option value="pt-BR">Português (Brasil)</option>
+                    <option value="pt-PT">Português (Portugal)</option>
+                    <option value="es">Español</option>
+                    <option value="fr">Français</option>
+                    <option value="de">Deutsch</option>
+                    <option value="it">Italiano</option>
+                  </select>
+                </label>
+              </div>
+
+              {#if exportScope !== "sheet"}
+                <label class="export-order">
+                  <span>Sheet order</span>
+                  <select value={exportSort} onchange={(event) => setExportSort(event.currentTarget.value as SheetSort)}>
+                    <option value="created-asc">Oldest first</option>
+                    <option value="created-desc">Newest first</option>
+                    <option value="title-asc">Title A–Z</option>
+                    <option value="title-desc">Title Z–A</option>
+                  </select>
+                </label>
+                <label class="export-option">
+                  <input
+                    type="checkbox"
+                    checked={exportTitlePage}
+                    onchange={(event) => setExportTitlePage(event.currentTarget.checked)}
+                  />
+                  <span><strong>Title page</strong><small>Use {exportTitle.trim() || currentExportTitle} as the document title</small></span>
+                </label>
+                <label class="export-option">
+                  <input
+                    type="checkbox"
+                    checked={exportPageBreaks}
+                    onchange={(event) => setExportPageBreaks(event.currentTarget.checked)}
+                  />
+                  <span><strong>New page for each sheet</strong><small>Applies to Word and PDF; EPUB uses chapters</small></span>
+                </label>
+              {/if}
+
+              <div class="export-divider"></div>
+              <button class="export-format-button" disabled={exportRunning} onclick={() => void exportSelection("docx")}>
                 <span class="export-format-mark">W</span>
                 <span><strong>Word document</strong><small>Editable manuscript (.docx)</small></span>
               </button>
-              <button role="menuitem" onclick={() => void exportCurrentSheet("pdf")}>
+              <button class="export-format-button" disabled={exportRunning} onclick={() => void exportSelection("pdf")}>
                 <span class="export-format-mark">P</span>
                 <span><strong>PDF</strong><small>Fixed-layout manuscript (.pdf)</small></span>
               </button>
-              <button role="menuitem" onclick={() => void exportCurrentSheet("epub")}>
+              <button class="export-format-button" disabled={exportRunning} onclick={() => void exportSelection("epub")}>
                 <span class="export-format-mark">E</span>
                 <span><strong>EPUB</strong><small>Reflowable ebook (.epub)</small></span>
               </button>

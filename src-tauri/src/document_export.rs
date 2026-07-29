@@ -62,6 +62,7 @@ const STYLES: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:after="0" w:line="480" w:lineRule="auto"/></w:pPr></w:style>
   <w:style w:type="paragraph" w:styleId="BodyText"><w:name w:val="Manuscript Body"/><w:basedOn w:val="Normal"/><w:next w:val="BodyText"/><w:qFormat/><w:pPr><w:ind w:firstLine="720"/></w:pPr></w:style>
   <w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Manuscript Title"/><w:basedOn w:val="Normal"/><w:next w:val="BodyText"/><w:qFormat/><w:pPr><w:keepNext/><w:jc w:val="center"/><w:spacing w:after="480"/></w:pPr><w:rPr><w:b/><w:sz w:val="28"/><w:szCs w:val="28"/></w:rPr></w:style>
+  <w:style w:type="paragraph" w:styleId="Byline"><w:name w:val="Author Byline"/><w:basedOn w:val="Normal"/><w:next w:val="BodyText"/><w:qFormat/><w:pPr><w:jc w:val="center"/><w:spacing w:before="0" w:after="240"/></w:pPr><w:rPr><w:i/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr></w:style>
   <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="Heading 1"/><w:basedOn w:val="Normal"/><w:next w:val="BodyText"/><w:qFormat/><w:pPr><w:keepNext/><w:keepLines/><w:jc w:val="center"/><w:spacing w:before="480" w:after="240"/></w:pPr><w:rPr><w:b/><w:sz w:val="26"/><w:szCs w:val="26"/></w:rPr></w:style>
   <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="Heading 2"/><w:basedOn w:val="Normal"/><w:next w:val="BodyText"/><w:qFormat/><w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before="360" w:after="120"/></w:pPr><w:rPr><w:b/></w:rPr></w:style>
   <w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="Heading 3"/><w:basedOn w:val="Normal"/><w:next w:val="BodyText"/><w:qFormat/><w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before="240"/></w:pPr><w:rPr><w:b/><w:i/></w:rPr></w:style>
@@ -90,6 +91,7 @@ struct Run {
 enum ParagraphKind {
     Body,
     Title,
+    Byline,
     Heading(u8),
     Quote,
     List { depth: usize },
@@ -101,6 +103,7 @@ enum ParagraphKind {
 struct Paragraph {
     kind: ParagraphKind,
     runs: Vec<Run>,
+    page_break_before: bool,
 }
 
 impl Paragraph {
@@ -108,6 +111,7 @@ impl Paragraph {
         Self {
             kind,
             runs: Vec::new(),
+            page_break_before: false,
         }
     }
 
@@ -132,6 +136,24 @@ impl Paragraph {
     fn has_text(&self) -> bool {
         self.runs.iter().any(|run| !run.text.trim().is_empty())
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExportSection {
+    pub title: String,
+    pub markdown: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ExportOptions {
+    pub title_page: bool,
+    pub page_breaks: bool,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ExportMetadata {
+    pub author: String,
+    pub language: String,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -219,6 +241,25 @@ impl MarkdownBuilder {
 }
 
 pub fn export_sheet_docx(path: &str, title: &str, markdown: &str) -> Result<String, String> {
+    export_document_docx(
+        path,
+        title,
+        &[ExportSection {
+            title: title.to_string(),
+            markdown: markdown.to_string(),
+        }],
+        ExportOptions::default(),
+        &ExportMetadata::default(),
+    )
+}
+
+pub fn export_document_docx(
+    path: &str,
+    title: &str,
+    sections: &[ExportSection],
+    options: ExportOptions,
+    metadata: &ExportMetadata,
+) -> Result<String, String> {
     let target = validate_destination(path)?;
     let parent = target
         .parent()
@@ -226,7 +267,7 @@ pub fn export_sheet_docx(path: &str, title: &str, markdown: &str) -> Result<Stri
     let mut temporary = NamedTempFile::new_in(parent)
         .map_err(|error| format!("Cannot create the temporary Word document: {error}"))?;
 
-    write_docx(temporary.as_file_mut(), title, markdown)?;
+    write_docx_document(temporary.as_file_mut(), title, sections, options, metadata)?;
     if let Ok(metadata) = fs::metadata(&target) {
         temporary
             .as_file_mut()
@@ -252,19 +293,57 @@ pub fn export_sheet_docx(path: &str, title: &str, markdown: &str) -> Result<Stri
 }
 
 pub fn export_sheet_pdf(path: &str, title: &str, markdown: &str) -> Result<String, String> {
+    export_document_pdf(
+        path,
+        title,
+        &[ExportSection {
+            title: title.to_string(),
+            markdown: markdown.to_string(),
+        }],
+        ExportOptions::default(),
+        &ExportMetadata::default(),
+    )
+}
+
+pub fn export_document_pdf(
+    path: &str,
+    title: &str,
+    sections: &[ExportSection],
+    options: ExportOptions,
+    metadata: &ExportMetadata,
+) -> Result<String, String> {
     let target = validate_export_destination(path, "pdf", "PDF")?;
-    let bytes = pdf_bytes(title, markdown)?;
+    let bytes = pdf_document_bytes(title, sections, options, metadata)?;
     persist_bytes(&target, &bytes, "PDF document")
 }
 
 pub fn export_sheet_epub(path: &str, title: &str, markdown: &str) -> Result<String, String> {
+    export_document_epub(
+        path,
+        title,
+        &[ExportSection {
+            title: title.to_string(),
+            markdown: markdown.to_string(),
+        }],
+        ExportOptions::default(),
+        &ExportMetadata::default(),
+    )
+}
+
+pub fn export_document_epub(
+    path: &str,
+    title: &str,
+    sections: &[ExportSection],
+    options: ExportOptions,
+    metadata: &ExportMetadata,
+) -> Result<String, String> {
     let target = validate_export_destination(path, "epub", "EPUB")?;
     let parent = target
         .parent()
         .ok_or_else(|| "The export destination has no parent folder.".to_string())?;
     let mut temporary = NamedTempFile::new_in(parent)
         .map_err(|error| format!("Cannot create the temporary EPUB: {error}"))?;
-    write_epub(temporary.as_file_mut(), title, markdown)?;
+    write_epub_document(temporary.as_file_mut(), title, sections, options, metadata)?;
     persist_temporary(temporary, &target, "EPUB")
 }
 
@@ -344,11 +423,32 @@ fn validate_destination(path: &str) -> Result<PathBuf, String> {
     validate_export_destination(path, "docx", "Word document")
 }
 
+#[cfg(test)]
 fn write_docx<W: Write + Seek>(writer: W, title: &str, markdown: &str) -> Result<(), String> {
+    write_docx_document(
+        writer,
+        title,
+        &[ExportSection {
+            title: title.to_string(),
+            markdown: markdown.to_string(),
+        }],
+        ExportOptions::default(),
+        &ExportMetadata::default(),
+    )
+}
+
+fn write_docx_document<W: Write + Seek>(
+    writer: W,
+    title: &str,
+    sections: &[ExportSection],
+    options: ExportOptions,
+    metadata: &ExportMetadata,
+) -> Result<(), String> {
     let title = normalized_title(title);
-    let paragraphs = manuscript_paragraphs(title, markdown);
+    let paragraphs = document_paragraphs(title, sections, options, &metadata.author)?;
     let document = document_xml(&paragraphs);
-    let core_properties = core_properties_xml(title);
+    let core_properties = core_properties_xml(title, metadata);
+    let styles = styles_xml(&metadata.language);
     let options = SimpleFileOptions::default()
         .compression_method(CompressionMethod::Stored)
         .unix_permissions(0o644);
@@ -360,7 +460,7 @@ fn write_docx<W: Write + Seek>(writer: W, title: &str, markdown: &str) -> Result
         ("docProps/app.xml", APP_PROPERTIES),
         ("docProps/core.xml", core_properties.as_str()),
         ("word/document.xml", document.as_str()),
-        ("word/styles.xml", STYLES),
+        ("word/styles.xml", styles.as_str()),
         ("word/_rels/document.xml.rels", DOCUMENT_RELATIONSHIPS),
     ] {
         archive
@@ -477,6 +577,18 @@ impl PdfParagraphStyle {
                 alignment: PdfAlignment::Center,
                 bold: true,
                 italic: false,
+            },
+            ParagraphKind::Byline => Self {
+                size: 11.0,
+                line_height: 18.0,
+                before: 0.0,
+                after: 18.0,
+                left: 0.0,
+                right: 0.0,
+                first_indent: 0.0,
+                alignment: PdfAlignment::Center,
+                bold: false,
+                italic: true,
             },
             ParagraphKind::Heading(1) => Self {
                 size: 15.0,
@@ -605,6 +717,14 @@ impl<'a> PdfLayout<'a> {
     }
 
     fn add_paragraph(&mut self, paragraph: &Paragraph) {
+        if paragraph.page_break_before
+            && self
+                .pages
+                .last()
+                .is_some_and(|operations| !operations.is_empty())
+        {
+            self.new_page();
+        }
         let style = PdfParagraphStyle::for_paragraph(paragraph);
         let characters = pdf_characters(paragraph, style);
         let available = PAGE_WIDTH_PT - PAGE_MARGIN_PT * 2.0 - style.left - style.right;
@@ -676,9 +796,27 @@ fn parse_pdf_font(bytes: &[u8], label: &str) -> Result<ParsedFont, String> {
         .ok_or_else(|| format!("Cannot load the bundled {label} export font."))
 }
 
+#[cfg(test)]
 fn pdf_bytes(title: &str, markdown: &str) -> Result<Vec<u8>, String> {
+    pdf_document_bytes(
+        title,
+        &[ExportSection {
+            title: title.to_string(),
+            markdown: markdown.to_string(),
+        }],
+        ExportOptions::default(),
+        &ExportMetadata::default(),
+    )
+}
+
+fn pdf_document_bytes(
+    title: &str,
+    sections: &[ExportSection],
+    options: ExportOptions,
+    metadata: &ExportMetadata,
+) -> Result<Vec<u8>, String> {
     let title = normalized_title(title);
-    let paragraphs = manuscript_paragraphs(title, markdown);
+    let paragraphs = document_paragraphs(title, sections, options, &metadata.author)?;
     let mut document = PdfDocument::new(title);
     let now = DateTime::now();
     document.metadata.info.creation_date = now;
@@ -686,6 +824,11 @@ fn pdf_bytes(title: &str, markdown: &str) -> Result<Vec<u8>, String> {
     document.metadata.info.metadata_date = now;
     document.metadata.info.creator = "Writing Environment".into();
     document.metadata.info.producer = "Writing Environment".into();
+    document.metadata.info.author = normalized_author(&metadata.author).to_string();
+    let language = normalized_language(&metadata.language);
+    if language != "und" {
+        document.metadata.info.subject = format!("Language: {language}");
+    }
     document.metadata.info.identifier = Uuid::new_v4().to_string();
     let fonts = PdfFonts::load(&mut document)?;
     let mut layout = PdfLayout::new(&fonts);
@@ -821,21 +964,71 @@ fn pdf_character_width(font: &ParsedFont, character: char, size: f32) -> f32 {
     units as f32 / font.units_per_em.max(1) as f32 * size
 }
 
+#[cfg(test)]
 fn write_epub<W: Write + Seek>(writer: W, title: &str, markdown: &str) -> Result<(), String> {
+    write_epub_document(
+        writer,
+        title,
+        &[ExportSection {
+            title: title.to_string(),
+            markdown: markdown.to_string(),
+        }],
+        ExportOptions::default(),
+        &ExportMetadata::default(),
+    )
+}
+
+fn write_epub_document<W: Write + Seek>(
+    writer: W,
+    title: &str,
+    sections: &[ExportSection],
+    options: ExportOptions,
+    metadata: &ExportMetadata,
+) -> Result<(), String> {
     let title = normalized_title(title);
+    if sections.is_empty() {
+        return Err("Choose at least one sheet to export.".into());
+    }
     let identifier = format!("urn:uuid:{}", Uuid::new_v4());
     let modified = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
-    let paragraphs = manuscript_paragraphs(title, markdown);
-    let chapter = epub_chapter_xhtml(title, &paragraphs);
-    let navigation = epub_navigation_xhtml(title);
-    let package = epub_package_xml(title, &identifier, &modified);
-    let options = SimpleFileOptions::default()
+    let chapters = sections
+        .iter()
+        .enumerate()
+        .map(|(index, section)| {
+            let section_title = normalized_title(&section.title);
+            let paragraphs = section_paragraphs(section_title, &section.markdown, true);
+            (
+                format!("chapter-{}.xhtml", index + 1),
+                section_title.to_string(),
+                epub_chapter_xhtml(
+                    section_title,
+                    &paragraphs,
+                    normalized_language(&metadata.language),
+                ),
+            )
+        })
+        .collect::<Vec<_>>();
+    let navigation = epub_navigation_xhtml(
+        title,
+        &chapters,
+        options.title_page,
+        normalized_language(&metadata.language),
+    );
+    let package = epub_package_xml(
+        title,
+        &identifier,
+        &modified,
+        &chapters,
+        options.title_page,
+        metadata,
+    );
+    let zip_options = SimpleFileOptions::default()
         .compression_method(CompressionMethod::Stored)
         .unix_permissions(0o644);
     let mut archive = ZipWriter::new(writer);
 
     archive
-        .start_file("mimetype", options)
+        .start_file("mimetype", zip_options)
         .map_err(|error| format!("Cannot start the EPUB package: {error}"))?;
     archive
         .write_all(b"application/epub+zip")
@@ -845,15 +1038,32 @@ fn write_epub<W: Write + Seek>(writer: W, title: &str, markdown: &str) -> Result
         ("META-INF/container.xml", EPUB_CONTAINER),
         ("OEBPS/content.opf", package.as_str()),
         ("OEBPS/nav.xhtml", navigation.as_str()),
-        ("OEBPS/text/sheet.xhtml", chapter.as_str()),
         ("OEBPS/styles/book.css", EPUB_CSS),
     ] {
         archive
-            .start_file(name, options)
+            .start_file(name, zip_options)
             .map_err(|error| format!("Cannot add {name} to the EPUB: {error}"))?;
         archive
             .write_all(contents.as_bytes())
             .map_err(|error| format!("Cannot write {name} to the EPUB: {error}"))?;
+    }
+    if options.title_page {
+        let title_page = epub_title_page_xhtml(title, metadata);
+        archive
+            .start_file("OEBPS/text/title.xhtml", zip_options)
+            .map_err(|error| format!("Cannot add the title page to the EPUB: {error}"))?;
+        archive
+            .write_all(title_page.as_bytes())
+            .map_err(|error| format!("Cannot write the EPUB title page: {error}"))?;
+    }
+    for (file_name, _, contents) in &chapters {
+        let path = format!("OEBPS/text/{file_name}");
+        archive
+            .start_file(&path, zip_options)
+            .map_err(|error| format!("Cannot add {path} to the EPUB: {error}"))?;
+        archive
+            .write_all(contents.as_bytes())
+            .map_err(|error| format!("Cannot write {path} to the EPUB: {error}"))?;
     }
     archive
         .finish()
@@ -871,6 +1081,7 @@ const EPUB_CONTAINER: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 const EPUB_CSS: &str = r#"html { color: #1d1b19; background: #fff; }
 body { max-width: 38em; margin: 0 auto; padding: 5%; font-family: serif; font-size: 1em; line-height: 1.55; }
 h1.title { margin: 1.5em 0 2em; text-align: center; font-size: 1.55em; }
+p.byline { margin: -1.25em 0 2em; text-align: center; text-indent: 0; font-style: italic; }
 h1 { margin: 2em 0 1em; text-align: center; font-size: 1.45em; }
 h2 { margin: 1.8em 0 0.65em; font-size: 1.2em; }
 h3, h4, h5, h6 { margin: 1.5em 0 0.5em; font-size: 1em; font-style: italic; }
@@ -884,45 +1095,129 @@ code { font-family: monospace; }
 nav ol { padding-left: 1.5em; }
 a { color: inherit; }"#;
 
-fn epub_package_xml(title: &str, identifier: &str, modified: &str) -> String {
+fn epub_package_xml(
+    title: &str,
+    identifier: &str,
+    modified: &str,
+    chapters: &[(String, String, String)],
+    title_page: bool,
+    metadata: &ExportMetadata,
+) -> String {
+    let title_item = if title_page {
+        "    <item id=\"title-page\" href=\"text/title.xhtml\" media-type=\"application/xhtml+xml\"/>\n"
+    } else {
+        ""
+    };
+    let chapter_items = chapters
+        .iter()
+        .enumerate()
+        .map(|(index, (file_name, _, _))| {
+            format!(
+                "    <item id=\"chapter-{}\" href=\"text/{}\" media-type=\"application/xhtml+xml\"/>\n",
+                index + 1,
+                xml_escape(file_name)
+            )
+        })
+        .collect::<String>();
+    let title_spine = if title_page {
+        "    <itemref idref=\"title-page\"/>\n"
+    } else {
+        ""
+    };
+    let chapter_spine = chapters
+        .iter()
+        .enumerate()
+        .map(|(index, _)| format!("    <itemref idref=\"chapter-{}\"/>\n", index + 1))
+        .collect::<String>();
+    let author = normalized_author(&metadata.author);
+    let creator = if author.is_empty() {
+        String::new()
+    } else {
+        format!("    <dc:creator>{}</dc:creator>\n", xml_escape(author))
+    };
+    let language = normalized_language(&metadata.language);
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
-<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id" xml:lang="und">
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id" xml:lang="{language}">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:identifier id="book-id">{identifier}</dc:identifier>
     <dc:title>{title}</dc:title>
-    <dc:language>und</dc:language>
-    <dc:creator>Writing Environment</dc:creator>
-    <meta property="dcterms:modified">{modified}</meta>
+    <dc:language>{language}</dc:language>
+{creator}    <meta property="dcterms:modified">{modified}</meta>
   </metadata>
   <manifest>
     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
-    <item id="sheet" href="text/sheet.xhtml" media-type="application/xhtml+xml"/>
     <item id="style" href="styles/book.css" media-type="text/css"/>
-  </manifest>
+{title_item}{chapter_items}  </manifest>
   <spine>
-    <itemref idref="sheet"/>
-  </spine>
+{title_spine}{chapter_spine}  </spine>
 </package>"#,
         identifier = xml_escape(identifier),
         title = xml_escape(title),
         modified = xml_escape(modified),
+        language = xml_escape(language),
+        creator = creator,
+        title_item = title_item,
+        chapter_items = chapter_items,
+        title_spine = title_spine,
+        chapter_spine = chapter_spine,
     )
 }
 
-fn epub_navigation_xhtml(title: &str) -> String {
+fn epub_navigation_xhtml(
+    title: &str,
+    chapters: &[(String, String, String)],
+    title_page: bool,
+    language: &str,
+) -> String {
+    let mut entries = String::new();
+    if title_page {
+        entries.push_str(&format!(
+            r#"<li><a href="text/title.xhtml">{}</a></li>"#,
+            xml_escape(title)
+        ));
+    }
+    for (file_name, chapter_title, _) in chapters {
+        entries.push_str(&format!(
+            r#"<li><a href="text/{}">{}</a></li>"#,
+            xml_escape(file_name),
+            xml_escape(chapter_title)
+        ));
+    }
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="und" lang="und">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="{language}" lang="{language}">
 <head><title>Contents</title><link rel="stylesheet" type="text/css" href="styles/book.css"/></head>
-<body><nav epub:type="toc" id="toc"><h1>Contents</h1><ol><li><a href="text/sheet.xhtml">{title}</a></li></ol></nav></body>
+<body><nav epub:type="toc" id="toc"><h1>Contents</h1><ol>{entries}</ol></nav></body>
 </html>"#,
-        title = xml_escape(title)
+        entries = entries,
+        language = xml_escape(language)
     )
 }
 
-fn epub_chapter_xhtml(title: &str, paragraphs: &[Paragraph]) -> String {
+fn epub_title_page_xhtml(title: &str, metadata: &ExportMetadata) -> String {
+    let author = normalized_author(&metadata.author);
+    let byline = if author.is_empty() {
+        String::new()
+    } else {
+        format!(r#"<p class="byline">{}</p>"#, xml_escape(author))
+    };
+    let language = normalized_language(&metadata.language);
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="{language}" lang="{language}">
+<head><title>{title}</title><link rel="stylesheet" type="text/css" href="../styles/book.css"/></head>
+<body><section epub:type="titlepage"><h1 class="title">{title}</h1>{byline}</section></body>
+</html>"#,
+        title = xml_escape(title),
+        language = xml_escape(language),
+        byline = byline,
+    )
+}
+
+fn epub_chapter_xhtml(title: &str, paragraphs: &[Paragraph], language: &str) -> String {
     let mut body = String::new();
     for paragraph in paragraphs {
         body.push_str(&epub_paragraph_xhtml(paragraph));
@@ -930,11 +1225,12 @@ fn epub_chapter_xhtml(title: &str, paragraphs: &[Paragraph]) -> String {
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="und" lang="und">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="{language}" lang="{language}">
 <head><title>{title}</title><link rel="stylesheet" type="text/css" href="../styles/book.css"/></head>
 <body><section epub:type="chapter">{body}</section></body>
 </html>"#,
-        title = xml_escape(title)
+        title = xml_escape(title),
+        language = xml_escape(language)
     )
 }
 
@@ -946,6 +1242,7 @@ fn epub_paragraph_xhtml(paragraph: &Paragraph) -> String {
         .collect::<String>();
     match paragraph.kind {
         ParagraphKind::Title => format!(r#"<h1 class="title">{contents}</h1>"#),
+        ParagraphKind::Byline => format!(r#"<p class="byline">{contents}</p>"#),
         ParagraphKind::Heading(level) => {
             let level = level.clamp(1, 6);
             format!("<h{level}>{contents}</h{level}>")
@@ -996,6 +1293,50 @@ fn normalized_title(title: &str) -> &str {
 }
 
 fn manuscript_paragraphs(title: &str, markdown: &str) -> Vec<Paragraph> {
+    section_paragraphs(title, markdown, true)
+}
+
+fn document_paragraphs(
+    title: &str,
+    sections: &[ExportSection],
+    options: ExportOptions,
+    author: &str,
+) -> Result<Vec<Paragraph>, String> {
+    if sections.is_empty() {
+        return Err("Choose at least one sheet to export.".into());
+    }
+    if sections.len() == 1 && !options.title_page {
+        return Ok(manuscript_paragraphs(
+            normalized_title(&sections[0].title),
+            &sections[0].markdown,
+        ));
+    }
+
+    let mut paragraphs = Vec::new();
+    if options.title_page {
+        let mut title_paragraph = Paragraph::new(ParagraphKind::Title);
+        title_paragraph.push(normalized_title(title), InlineStyle::default());
+        paragraphs.push(title_paragraph);
+        let author = normalized_author(author);
+        if !author.is_empty() {
+            let mut byline = Paragraph::new(ParagraphKind::Byline);
+            byline.push(author, InlineStyle::default());
+            paragraphs.push(byline);
+        }
+    }
+    for (index, section) in sections.iter().enumerate() {
+        let section_title = normalized_title(&section.title);
+        let mut section_paragraphs = section_paragraphs(section_title, &section.markdown, false);
+        let mut heading = Paragraph::new(ParagraphKind::Heading(1));
+        heading.page_break_before = options.title_page || (options.page_breaks && index > 0);
+        heading.push(section_title, InlineStyle::default());
+        paragraphs.push(heading);
+        paragraphs.append(&mut section_paragraphs);
+    }
+    Ok(paragraphs)
+}
+
+fn section_paragraphs(title: &str, markdown: &str, include_title: bool) -> Vec<Paragraph> {
     let mut builder = MarkdownBuilder::default();
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
@@ -1082,9 +1423,11 @@ fn manuscript_paragraphs(title: &str, markdown: &str) -> Vec<Paragraph> {
         builder.paragraphs.remove(0);
     }
 
-    let mut title_paragraph = Paragraph::new(ParagraphKind::Title);
-    title_paragraph.push(title, InlineStyle::default());
-    builder.paragraphs.insert(0, title_paragraph);
+    if include_title {
+        let mut title_paragraph = Paragraph::new(ParagraphKind::Title);
+        title_paragraph.push(title, InlineStyle::default());
+        builder.paragraphs.insert(0, title_paragraph);
+    }
     builder.paragraphs
 }
 
@@ -1128,6 +1471,7 @@ fn paragraph_xml(paragraph: &Paragraph) -> String {
     let (style, extra_properties) = match paragraph.kind {
         ParagraphKind::Body => ("BodyText", String::new()),
         ParagraphKind::Title => ("Title", String::new()),
+        ParagraphKind::Byline => ("Byline", String::new()),
         ParagraphKind::Heading(1) => ("Heading1", String::new()),
         ParagraphKind::Heading(2) => ("Heading2", String::new()),
         ParagraphKind::Heading(_) => ("Heading3", String::new()),
@@ -1142,7 +1486,13 @@ fn paragraph_xml(paragraph: &Paragraph) -> String {
         ParagraphKind::SceneBreak => ("SceneBreak", String::new()),
         ParagraphKind::Code => ("CodeBlock", String::new()),
     };
-    let mut xml = format!(r#"<w:p><w:pPr><w:pStyle w:val="{style}"/>{extra_properties}</w:pPr>"#);
+    let page_break = if paragraph.page_break_before {
+        "<w:pageBreakBefore/>"
+    } else {
+        ""
+    };
+    let mut xml =
+        format!(r#"<w:p><w:pPr><w:pStyle w:val="{style}"/>{page_break}{extra_properties}</w:pPr>"#);
     for run in &paragraph.runs {
         xml.push_str(&run_xml(run));
     }
@@ -1186,12 +1536,46 @@ fn run_xml(run: &Run) -> String {
     xml
 }
 
-fn core_properties_xml(title: &str) -> String {
+fn core_properties_xml(title: &str, metadata: &ExportMetadata) -> String {
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+    let author = normalized_author(&metadata.author);
+    let language = normalized_language(&metadata.language);
     format!(
-        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>{}</dc:title><dc:creator>Writing Environment</dc:creator><cp:lastModifiedBy>Writing Environment</cp:lastModifiedBy><dcterms:created xsi:type="dcterms:W3CDTF">{now}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">{now}</dcterms:modified></cp:coreProperties>"#,
-        xml_escape(title)
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>{title}</dc:title><dc:creator>{author}</dc:creator><dc:language>{language}</dc:language><cp:lastModifiedBy>Writing Environment</cp:lastModifiedBy><dcterms:created xsi:type="dcterms:W3CDTF">{now}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">{now}</dcterms:modified></cp:coreProperties>"#,
+        title = xml_escape(title),
+        author = xml_escape(author),
+        language = xml_escape(language),
     )
+}
+
+fn styles_xml(language: &str) -> String {
+    let language = normalized_language(language);
+    STYLES.replacen(
+        "<w:rPrDefault><w:rPr>",
+        &format!(
+            r#"<w:rPrDefault><w:rPr><w:lang w:val="{}"/>"#,
+            xml_escape(language)
+        ),
+        1,
+    )
+}
+
+fn normalized_author(author: &str) -> &str {
+    author.trim()
+}
+
+fn normalized_language(language: &str) -> &str {
+    let language = language.trim();
+    if !language.is_empty()
+        && language.len() <= 35
+        && language
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    {
+        language
+    } else {
+        "und"
+    }
 }
 
 fn xml_escape(value: &str) -> String {
@@ -1303,6 +1687,14 @@ mod tests {
     }
 
     #[test]
+    fn document_language_tags_are_sanitized() {
+        assert_eq!(normalized_language("pt-BR"), "pt-BR");
+        assert_eq!(normalized_language("en-US"), "en-US");
+        assert_eq!(normalized_language("en_US"), "und");
+        assert_eq!(normalized_language("\"/><script>"), "und");
+    }
+
+    #[test]
     fn export_atomically_creates_and_replaces_a_docx() {
         let directory = tempfile::tempdir().unwrap();
         let target = directory.path().join("Draft.docx");
@@ -1344,14 +1736,14 @@ mod tests {
             "META-INF/container.xml",
             "OEBPS/content.opf",
             "OEBPS/nav.xhtml",
-            "OEBPS/text/sheet.xhtml",
+            "OEBPS/text/chapter-1.xhtml",
             "OEBPS/styles/book.css",
         ] {
             assert!(archive.by_name(name).is_ok(), "missing {name}");
         }
         drop(archive);
 
-        let chapter = part(&bytes, "OEBPS/text/sheet.xhtml");
+        let chapter = part(&bytes, "OEBPS/text/chapter-1.xhtml");
         assert_eq!(chapter.matches("class=\"title\"").count(), 1);
         assert!(!chapter.contains("Hidden"));
         assert!(chapter.contains("<h2>Chapter One</h2>"));
@@ -1382,10 +1774,70 @@ mod tests {
         export_sheet_epub(&epub_path, "Draft", "Second version.").unwrap();
 
         assert!(fs::read(&pdf_target).unwrap().starts_with(b"%PDF-"));
-        assert!(
-            part(&fs::read(&epub_target).unwrap(), "OEBPS/text/sheet.xhtml")
-                .contains("Second version.")
-        );
+        assert!(part(
+            &fs::read(&epub_target).unwrap(),
+            "OEBPS/text/chapter-1.xhtml"
+        )
+        .contains("Second version."));
+    }
+
+    #[test]
+    fn assembled_documents_preserve_order_titles_and_page_breaks() {
+        let sections = vec![
+            ExportSection {
+                title: "Opening".into(),
+                markdown: "# Opening\n\nFirst sheet.".into(),
+            },
+            ExportSection {
+                title: "Afterward".into(),
+                markdown: "# Afterward\n\nSecond sheet.".into(),
+            },
+        ];
+        let options = ExportOptions {
+            title_page: true,
+            page_breaks: true,
+        };
+        let metadata = ExportMetadata {
+            author: "Thiago Author".into(),
+            language: "pt-BR".into(),
+        };
+
+        let mut docx = Cursor::new(Vec::new());
+        write_docx_document(&mut docx, "Collected Work", &sections, options, &metadata).unwrap();
+        let docx_bytes = docx.into_inner();
+        let document = part(&docx_bytes, "word/document.xml");
+        let core = part(&docx_bytes, "docProps/core.xml");
+        let styles = part(&docx_bytes, "word/styles.xml");
+        assert!(document.find("Collected Work").unwrap() < document.find("Opening").unwrap());
+        assert!(document.find("Opening").unwrap() < document.find("Afterward").unwrap());
+        assert_eq!(document.matches("<w:pageBreakBefore/>").count(), 2);
+        assert_eq!(document.matches("First sheet.").count(), 1);
+        assert!(document.contains("w:val=\"Byline\""));
+        assert!(core.contains("<dc:creator>Thiago Author</dc:creator>"));
+        assert!(core.contains("<dc:language>pt-BR</dc:language>"));
+        assert!(styles.contains("<w:lang w:val=\"pt-BR\"/>"));
+
+        let pdf = pdf_document_bytes("Collected Work", &sections, options, &metadata).unwrap();
+        let parsed = PdfDocument::parse(&pdf, &PdfParseOptions::default(), &mut Vec::new())
+            .expect("assembled PDF should parse");
+        assert_eq!(parsed.pages.len(), 3);
+        assert_eq!(parsed.metadata.info.author, "Thiago Author");
+        assert_eq!(parsed.metadata.info.subject, "Language: pt-BR");
+
+        let mut epub = Cursor::new(Vec::new());
+        write_epub_document(&mut epub, "Collected Work", &sections, options, &metadata).unwrap();
+        let bytes = epub.into_inner();
+        let package = part(&bytes, "OEBPS/content.opf");
+        let navigation = part(&bytes, "OEBPS/nav.xhtml");
+        assert!(package.contains("text/title.xhtml"));
+        assert!(package.contains("text/chapter-1.xhtml"));
+        assert!(package.contains("text/chapter-2.xhtml"));
+        assert!(package.contains("<dc:creator>Thiago Author</dc:creator>"));
+        assert!(package.contains("<dc:language>pt-BR</dc:language>"));
+        assert!(navigation.find("Opening").unwrap() < navigation.find("Afterward").unwrap());
+        assert!(part(&bytes, "OEBPS/text/title.xhtml").contains("Thiago Author"));
+        assert!(part(&bytes, "OEBPS/text/chapter-1.xhtml").contains("First sheet."));
+        assert!(part(&bytes, "OEBPS/text/chapter-2.xhtml").contains("Second sheet."));
     }
 
     #[test]
@@ -1416,20 +1868,53 @@ This paragraph is long enough to demonstrate the manuscript measure, first-line 
 
 The water climbed another inch.
 "#;
-        export_sheet_pdf(
+        let sections = vec![
+            ExportSection { title: "The Arrival".into(), markdown: markdown.into() },
+            ExportSection {
+                title: "A Light Offshore".into(),
+                markdown: "# A Light Offshore\n\nThe light paused on the empty horizon, then swept back toward the harbor.\n\nA second paragraph proves that each sheet keeps a clear manuscript rhythm.".into(),
+            },
+            ExportSection {
+                title: "The Empty Room".into(),
+                markdown: "# The Empty Room\n\nBy morning, every photograph had been turned over.".into(),
+            },
+        ];
+        let options = ExportOptions {
+            title_page: true,
+            page_breaks: true,
+        };
+        let metadata = ExportMetadata {
+            author: "Thiago Author".into(),
+            language: "pt-BR".into(),
+        };
+        export_document_docx(
             &Path::new(&directory)
-                .join("The Arrival.pdf")
+                .join("Collected Work.docx")
                 .to_string_lossy(),
-            "The Arrival",
-            markdown,
+            "Collected Work",
+            &sections,
+            options,
+            &metadata,
         )
         .unwrap();
-        export_sheet_epub(
+        export_document_pdf(
             &Path::new(&directory)
-                .join("The Arrival.epub")
+                .join("Collected Work.pdf")
                 .to_string_lossy(),
-            "The Arrival",
-            markdown,
+            "Collected Work",
+            &sections,
+            options,
+            &metadata,
+        )
+        .unwrap();
+        export_document_epub(
+            &Path::new(&directory)
+                .join("Collected Work.epub")
+                .to_string_lossy(),
+            "Collected Work",
+            &sections,
+            options,
+            &metadata,
         )
         .unwrap();
     }
