@@ -114,9 +114,9 @@ jobs:
         with:
           releaseId: ${{ needs.prepare-release.outputs.release_id }}
           releaseBody: |
-            Fixes the Raspberry Pi appliance's Display and Control Centre behavior. Display now opens a dedicated screen-layout window instead of calling a standalone command that Raspberry Pi OS does not ship.
+            Removes Raspberry Pi's Desktop/Taskbar appearance plugin from the panel-free Writing Environment appliance. Its controls target PCManFM's desktop and wf-panel-pi, which the appliance deliberately does not run.
 
-            The writer remains visually fullscreen, but now uses a borderless maximized Linux window so Control Centre dialogs and other system utilities can appear above it. This prevents settings actions from seeming to freeze when a dialog opens. System-drawer launches are also recorded in ~/.cache/writing-environment/launcher.log for diagnostics.
+            Toggling options such as Show Home Folder previously launched pcmanfm --reconfigure synchronously. With no existing desktop process, that command remained open and blocked Control Centre. The incompatible Desktop, Taskbar, Appearance, and Defaults pages are now absent; Screens, mouse and keyboard, Raspberry Pi system configuration, and Bluetooth remain available.
 
             The signed APT repository continues to update the application and appliance shell together with Raspberry Pi OS through the Super+Space Updates action. Fresh flashable images include this fix.
 

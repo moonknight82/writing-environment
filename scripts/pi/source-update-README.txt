@@ -1,4 +1,4 @@
-Writing Environment Pi update 0.5.3
+Writing Environment Pi update 0.5.4
 ===================================
 
 This source kit updates an existing 64-bit Raspberry Pi 4 appliance. It builds
@@ -24,8 +24,8 @@ recommended.
 Open Terminal in the local folder and run:
 
   sha256sum -c SHA256SUMS
-  tar -xzf writing-environment-pi-source-update-0.5.3-20260729.tar.gz
-  cd writing-environment-pi-source-update-0.5.3-20260729
+  tar -xzf writing-environment-pi-source-update-0.5.4-20260729.tar.gz
+  cd writing-environment-pi-source-update-0.5.4-20260729
   chmod +x scripts/pi/*.sh scripts/pi-image/*.sh deploy/pi-image/*.sh
   ./scripts/pi/update-current-appliance-from-source.sh
 

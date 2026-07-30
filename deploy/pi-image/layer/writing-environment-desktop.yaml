@@ -1,6 +1,6 @@
 # METABEGIN
 # X-Env-Layer-Name: writing-environment-desktop
-# X-Env-Layer-Version: 0.5.3
+# X-Env-Layer-Version: 0.5.4
 # X-Env-Layer-Category: application
 # X-Env-Layer-Desc: Fullscreen Labwc writing appliance with Fuzzel system drawer.
 # X-Env-Layer-Requires: device-user-admin,systemd-min
@@ -24,7 +24,6 @@ mmdebstrap:
     - libxdo3
     - locales
     - pi-bluetooth
-    - pipanel
     - plymouth
     - plymouth-themes
     - procps
