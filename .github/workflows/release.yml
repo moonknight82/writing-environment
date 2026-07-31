@@ -36,10 +36,11 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           tag="v${version}"
-          release_id="$(
+          find_release_id() {
             gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
               --jq ".[] | select(.tag_name == \"${tag}\") | .id" | sort -n | head -1
-          )"
+          }
+          release_id="$(find_release_id)"
 
           if [[ -z "$release_id" ]]; then
             gh release create "$tag" \
@@ -47,8 +48,15 @@ jobs:
               --title "Writing Environment ${tag}" \
               --draft \
               --notes-file .github/release-notes.md
-            release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .id)"
+            # The release-by-tag endpoint does not expose drafts. Look it up
+            # through the authenticated release list after creation instead.
+            release_id="$(find_release_id)"
           fi
+
+          [[ -n "$release_id" ]] || {
+            echo "Could not locate release ${tag} after creating it." >&2
+            exit 1
+          }
 
           echo "release_id=${release_id}" >>"$GITHUB_OUTPUT"
 
