@@ -6,5 +6,11 @@ export default defineConfig({
   clearScreen: false,
   server: {
     strictPort: true,
+    watch: {
+      ignored: [
+        "**/artifacts/**",
+        "**/src-tauri/target/**",
+      ],
+    },
   },
 });

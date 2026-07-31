@@ -45,6 +45,7 @@ jobs:
             gh release create "$tag" \
               --target "$GITHUB_SHA" \
               --title "Writing Environment ${tag}" \
+              --draft \
               --notes-file .github/release-notes.md
             release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .id)"
           fi
@@ -123,7 +124,7 @@ jobs:
             Signed desktop release for macOS Apple Silicon, Linux amd64, and Raspberry Pi ARM64.
 
             This is a personal project under active development. Back up important writing and review the release notes before updating.
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
           uploadUpdaterJson: true
           uploadUpdaterSignatures: true
@@ -244,3 +245,14 @@ jobs:
       - name: Publish signed APT repository
         id: deployment
         uses: actions/deploy-pages@v4
+
+  publish-release:
+    needs: deploy-apt-repository
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the complete release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false

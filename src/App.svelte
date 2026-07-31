@@ -44,6 +44,7 @@
   } from "./lib/sync";
   import { applyTheme, themes } from "./lib/themes";
   import { exportDocument, type ExportFormat } from "./lib/documentExport";
+  import { renderMarkdownPreview } from "./lib/markdownPreview";
 
   interface FolderSummary {
     path: string;
@@ -75,6 +76,7 @@
   }
 
   type WritingFocusMode = "off" | "paragraph" | "sentence";
+  type EditorMode = "write" | "preview";
   type SheetSort = "created-desc" | "created-asc" | "title-asc" | "title-desc";
   type ExportScope = "sheet" | "folder" | "project";
 
@@ -208,11 +210,15 @@ It passed the abandoned signal house before descending between black pines to th
 
   const prototypeProjectPath = "browser-prototype";
   const initialText = prototypeSheetBodies[prototypeSheets[0].relativePath];
+  const previewScenario = import.meta.env.DEV
+    ? new URLSearchParams(globalThis.location?.search ?? "").get("desktop-preview")
+    : null;
+  const emptyInboxPreview = previewScenario === "empty-inbox";
   const desktopMode = desktopAvailable()
-    || (import.meta.env.DEV && new URLSearchParams(globalThis.location?.search ?? "").has("desktop-preview"));
+    || previewScenario !== null;
 
-  let activeGroup = desktopMode ? "All Sheets" : "Draft";
-  let activeSheet = desktopMode ? "No sheet open" : "The Arrival";
+  let activeGroup = emptyInboxPreview ? "Inbox" : desktopMode ? "All Sheets" : "Draft";
+  let activeSheet = emptyInboxPreview ? "No Inbox sheets" : desktopMode ? "No sheet open" : "The Arrival";
   let activeSheetPath: string | null = desktopMode ? null : prototypeSheets[0].relativePath;
   let activeThemeId = "paper";
   let libraryVisible = true;
@@ -230,6 +236,7 @@ It passed the abandoned signal house before descending between black pines to th
   let spellCheckEnabled = true;
   let automaticCorrection = false;
   let writingFocusMode: WritingFocusMode = "off";
+  let editorMode: EditorMode = "write";
   let cursorPosition = 0;
   let editorTextarea: HTMLTextAreaElement;
   let focusOverlay: HTMLPreElement;
@@ -247,14 +254,15 @@ It passed the abandoned signal house before descending between black pines to th
   const sessionBaselines = new Map<string, number>();
   const sessionCounts = new Map<string, number>();
   let content = desktopMode ? "" : initialText;
+  let previewHtml = "";
   let currentWordCount = wordCount(content);
   let typingMetricsTimer: ReturnType<typeof setTimeout> | undefined;
   let persistedContent = content;
   let saveStatus = desktopMode ? "No sheet open" : "Saved locally";
-  let libraryName = desktopMode ? "No project open" : "Prototype Library";
-  let libraryPath: string | null = null;
-  let inboxPath: string | null = null;
-  let inboxActive = false;
+  let libraryName = emptyInboxPreview ? "Inbox" : desktopMode ? "No project open" : "Prototype Library";
+  let libraryPath: string | null = emptyInboxPreview ? "development-inbox" : null;
+  let inboxPath: string | null = emptyInboxPreview ? "development-inbox" : null;
+  let inboxActive = emptyInboxPreview;
   let inboxSheetCount = 0;
   let sheets = desktopMode ? [] : prototypeSheets;
   let folders = folderSummaries(sheets);
@@ -352,7 +360,7 @@ It passed the abandoned signal house before descending between black pines to th
   let externalConflictPath: string | null = null;
   let externalDiskContent: string | null = null;
   let resolvingExternalConflict = false;
-  let appVersion = "0.5.4";
+  let appVersion = "0.5.5";
   let automaticUpdateChecks = true;
   let updateVisible = false;
   let updateChecking = false;
@@ -371,6 +379,7 @@ It passed the abandoned signal house before descending between black pines to th
         : sheets.filter((sheet) => sheetIsInFolder(sheet, activeGroup)),
     sheetSort,
   );
+  $: previewHtml = editorMode === "preview" ? renderMarkdownPreview(content) : "";
   $: sortedProjects = [...projects].sort(
     (left, right) => Number(right.pinned) - Number(left.pinned) || right.lastOpened - left.lastOpened,
   );
@@ -383,7 +392,11 @@ It passed the abandoned signal house before descending between black pines to th
   $: filteredTrashItems = trashOriginFilter === "all"
     ? trashItems
     : trashItems.filter((item) => item.originId === trashOriginFilter);
-  $: scheduleFocusOverlayRefresh(content, cursorPosition, writingFocusMode);
+  $: scheduleFocusOverlayRefresh(
+    content,
+    cursorPosition,
+    editorMode === "write" ? writingFocusMode : "off",
+  );
   $: universalSyncTargets = buildUniversalSyncTargets();
   $: syncNeedsInitialization = universalSyncTargets.some(
     (target) => target.included && !target.initialized,
@@ -807,9 +820,11 @@ It passed the abandoned signal house before descending between black pines to th
     activeSheet = "No Markdown sheets";
     activeSheetPath = null;
     content = "";
+    editorMode = "write";
     currentWordCount = 0;
     persistedContent = "";
     dirty = false;
+    saveStatus = "No sheet open";
     clearExternalConflict();
     rememberLastWorkspace();
   }
@@ -847,9 +862,22 @@ It passed the abandoned signal house before descending between black pines to th
   }
 
   function handleWindowKeydown(event: KeyboardEvent): void {
-    if (event.key !== "F11") return;
-    event.preventDefault();
-    void toggleAppFullscreen();
+    if (event.key === "F11") {
+      event.preventDefault();
+      void toggleAppFullscreen();
+      return;
+    }
+
+    if (
+      activeSheetPath
+      && event.shiftKey
+      && (event.metaKey || event.ctrlKey)
+      && !event.altKey
+      && event.key.toLowerCase() === "m"
+    ) {
+      event.preventDefault();
+      setEditorMode(editorMode === "write" ? "preview" : "write");
+    }
   }
 
   function handleWindowClick(event: MouseEvent): void {
@@ -934,6 +962,22 @@ It passed the abandoned signal house before descending between black pines to th
     localStorage.setItem("writing-environment.writing-focus", mode);
     focusMenuVisible = false;
     scheduleFocusOverlayGeometryRefresh();
+  }
+
+  function setEditorMode(mode: EditorMode): void {
+    if (!activeSheetPath || mode === editorMode) return;
+    if (editorTextarea) updateCursor(editorTextarea);
+    editorMode = mode;
+    closeToolbarMenus();
+
+    if (mode === "write") {
+      requestAnimationFrame(() => {
+        if (!editorTextarea) return;
+        editorTextarea.focus();
+        editorTextarea.setSelectionRange(cursorPosition, cursorPosition);
+        scheduleFocusOverlayGeometryRefresh();
+      });
+    }
   }
 
   function setSessionGoal(value: number): void {
@@ -1343,6 +1387,7 @@ It passed the abandoned signal house before descending between black pines to th
     searchQuery = "";
     searchResults = [];
     content = "";
+    editorMode = "write";
     currentWordCount = 0;
     persistedContent = "";
     cursorPosition = 0;
@@ -1382,13 +1427,14 @@ It passed the abandoned signal house before descending between black pines to th
       activeSheetPath = null;
       content = "";
       persistedContent = "";
+      editorMode = "write";
     }
 
     cursorPosition = 0;
     registerSessionSheet();
     dirty = false;
     clearExternalConflict();
-    saveStatus = "Saved locally";
+    saveStatus = firstSheet ? "Saved locally" : "No sheet open";
     await refreshUniversalTrash();
     rememberLastWorkspace();
     errorMessage = libraryWarningMessage(selected);
@@ -1435,13 +1481,14 @@ It passed the abandoned signal house before descending between black pines to th
       activeSheetPath = null;
       content = "";
       persistedContent = "";
+      editorMode = "write";
     }
 
     cursorPosition = 0;
     registerSessionSheet();
     dirty = false;
     clearExternalConflict();
-    saveStatus = "Saved locally";
+    saveStatus = firstSheet ? "Saved locally" : "No sheet open";
     errorMessage = libraryWarningMessage(selected);
     await refreshUniversalTrash();
     await watchActiveLibrary(selected.path);
@@ -3325,6 +3372,15 @@ It passed the abandoned signal house before descending between black pines to th
         >
           ▤
         </button>
+        <button
+          class:active={editorMode === "preview"}
+          class="editor-mode-button"
+          disabled={!activeSheetPath}
+          aria-label={editorMode === "preview" ? "Return to writing" : "Preview formatted Markdown"}
+          aria-pressed={editorMode === "preview"}
+          title={editorMode === "preview" ? "Return to Write mode (Command/Control+Shift+M)" : "Preview formatted Markdown (Command/Control+Shift+M)"}
+          onclick={() => setEditorMode(editorMode === "write" ? "preview" : "write")}
+        >{editorMode === "preview" ? "Write" : "Preview"}</button>
       </div>
 
       <div class="document-title">{activeSheet}</div>
@@ -3724,10 +3780,11 @@ It passed the abandoned signal house before descending between black pines to th
           <button
             class:active={writingFocusMode !== "off" || focusMenuVisible}
             class="writing-focus-button"
+            disabled={!activeSheetPath || editorMode === "preview"}
             aria-label={`Writing focus: ${writingFocusMode}`}
             aria-haspopup="menu"
             aria-expanded={focusMenuVisible}
-            title={`Writing focus: ${writingFocusMode}`}
+            title={editorMode === "preview" ? "Writing focus is available in Write mode" : `Writing focus: ${writingFocusMode}`}
             onclick={() => {
               focusMenuVisible = !focusMenuVisible;
               exportMenuVisible = false;
@@ -4005,27 +4062,51 @@ It passed the abandoned signal house before descending between black pines to th
           <strong>No project open</strong>
           <p>Open a project folder from the Projects sidebar to begin writing.</p>
         </div>
+      {:else if !activeSheetPath}
+        <div class="no-workspace no-sheet-open">
+          <span aria-hidden="true">＋</span>
+          <strong>{inboxActive ? "Your Inbox is empty" : "No sheet is open"}</strong>
+          <p>{inboxActive
+            ? "Create an Inbox sheet for a new idea, then move it into a project whenever it is ready."
+            : "Create or select a Markdown sheet before you begin writing."}</p>
+          {#if libraryPath && !trashActive}
+            <button
+              class="empty-editor-action"
+              disabled={mutatingLibrary}
+              onclick={() => openSheetDialog("create")}
+            >Create a sheet</button>
+          {/if}
+        </div>
       {:else}
       <div class="editor-stage">
+        {#if editorMode === "preview"}
+          <article
+            class="markdown-preview"
+            aria-label={`Formatted preview of ${activeSheet}`}
+          >
+            {@html previewHtml}
+          </article>
+        {:else}
         {#if writingFocusMode !== "off"}
           <pre class="focus-overlay" aria-hidden="true" bind:this={focusOverlay}><span bind:this={focusBefore}></span><span class="active" bind:this={focusActive}></span><span bind:this={focusAfter}></span></pre>
         {/if}
-      <textarea
-        bind:this={editorTextarea}
-        value={content}
-        class:focus-enabled={writingFocusMode !== "off"}
-        aria-label="Markdown manuscript"
-        autocapitalize="off"
-        autocomplete="off"
-        autocorrect={automaticCorrection ? "on" : "off"}
-        spellcheck={spellCheckEnabled}
-        oninput={(event) => handleEditorInput(event.currentTarget)}
-        onfocus={(event) => updateCursor(event.currentTarget)}
-        onclick={(event) => updateCursor(event.currentTarget)}
-        onkeyup={(event) => updateCursor(event.currentTarget)}
-        onselect={(event) => updateCursor(event.currentTarget)}
-        onscroll={(event) => syncFocusOverlay(event.currentTarget)}
-      ></textarea>
+        <textarea
+          bind:this={editorTextarea}
+          value={content}
+          class:focus-enabled={writingFocusMode !== "off"}
+          aria-label="Markdown manuscript"
+          autocapitalize="off"
+          autocomplete="off"
+          autocorrect={automaticCorrection ? "on" : "off"}
+          spellcheck={spellCheckEnabled}
+          oninput={(event) => handleEditorInput(event.currentTarget)}
+          onfocus={(event) => updateCursor(event.currentTarget)}
+          onclick={(event) => updateCursor(event.currentTarget)}
+          onkeyup={(event) => updateCursor(event.currentTarget)}
+          onselect={(event) => updateCursor(event.currentTarget)}
+          onscroll={(event) => syncFocusOverlay(event.currentTarget)}
+        ></textarea>
+        {/if}
       </div>
       {/if}
     </div>

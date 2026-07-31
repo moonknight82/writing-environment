@@ -1,12 +1,16 @@
-Removes Raspberry Pi's Desktop/Taskbar appearance plugin from the panel-free
-Writing Environment appliance. Its controls target PCManFM's desktop and
-wf-panel-pi, which the appliance deliberately does not run.
+Adds a formatted Markdown Preview beside the fast source-writing mode. Preview
+renders common Markdown structure, including headings, emphasis, quotations,
+lists, code, and tables, and sanitizes rendered HTML before showing it.
 
-Toggling options such as **Show Home Folder** previously launched
-`pcmanfm --reconfigure` synchronously. With no existing desktop process, that
-command remained open and blocked Control Centre. The incompatible Desktop,
-Taskbar, Appearance, and Defaults pages are now absent; Screens, mouse and
-keyboard, Raspberry Pi system configuration, and Bluetooth remain available.
+An empty Inbox now has an explicit, non-editable empty state with a **Create a
+sheet** action, so writing is never accidentally detached from a Markdown
+file. Switching back to Write preserves the original source and continues to
+use the operating system's spelling support.
+
+GitHub Releases now remain drafts while signed desktop artifacts, the updater
+manifest, and Raspberry Pi appliance packages are produced. They become public
+only once all required pieces are present, preventing an update check from
+seeing a release without `latest.json`.
 
 The signed APT repository continues to update the application and appliance
 shell together with Raspberry Pi OS through the Super+Space Updates action.

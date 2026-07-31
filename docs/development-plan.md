@@ -94,6 +94,16 @@ Completed:
 
 Exported files are products of Markdown projects. They do not replace or modify the source manuscripts.
 
+## Editor polish
+
+Current work:
+
+- [x] Replace the writable blank Inbox surface with a clear empty state and explicit Create Sheet action.
+- [x] Add a sanitized Markdown preview that renders headings, bold, italics, lists, quotations, code, and tables without changing source files.
+- [x] Keep Write mode on the low-latency native textarea so preview parsing does not enter the keystroke path or replace operating-system spell checking.
+- [x] Keep GitHub releases private until the updater manifest and all signed platform artifacts exist.
+- [ ] Smoke-test Write/Preview switching, empty Inbox behavior, spelling, Writing Focus, and updater checks on macOS, Linux amd64, and the physical 2 GB Raspberry Pi.
+
 ## Later work
 
 - plugin architecture and marketplace;

@@ -16,6 +16,7 @@ The v0.1 desktop vertical slice and dedicated Raspberry Pi appliance image are c
 - a dedicated Projects area with persistent recent projects and pinning;
 - a permanent Inbox of ordinary Markdown files for writing before choosing a project;
 - native Markdown-folder selection;
+- explicit Write and formatted Markdown Preview modes, with sanitized rendering for headings, emphasis, lists, quotations, code, and tables;
 - recursive Markdown discovery and metadata extraction;
 - sheet creation, rename, duplication, and folder moves;
 - safe Inbox-to-project moves that atomically place and verify the destination before removing the source;
@@ -66,7 +67,7 @@ Version 0.5.0 introduces one-way document export for the current in-memory sheet
 
 Version 0.5.1 completes the export milestone with selected-folder and complete-project assembly. Writers can choose alphabetical or creation-date ordering, a title page, section page breaks, title/author/language metadata, and reusable export presets. All three formats omit YAML front matter, avoid duplicating matching opening titles, and write atomically beside the chosen destination.
 
-Version 0.5.4 removes Raspberry Pi's incompatible Desktop/Taskbar appearance plugin from the panel-free appliance Control Centre. Version 0.5.3 made the writer visually fullscreen while allowing Raspberry Pi settings windows and dialogs to rise normally, and added a dedicated Display Settings launcher. The signed APT repository introduced in 0.5.2 updates the application, Fuzzel/Labwc shell, keyboard defaults, settings integration, and Plymouth theme alongside the normal Raspberry Pi OS packages.
+Version 0.5.5 adds a safe formatted Markdown preview and makes an empty Inbox explicitly non-editable until a sheet is created. It also prevents an incomplete GitHub Release from becoming the updater's latest release before its signed update manifest is available. Version 0.5.4 removes Raspberry Pi's incompatible Desktop/Taskbar appearance plugin from the panel-free appliance Control Centre. Version 0.5.3 made the writer visually fullscreen while allowing Raspberry Pi settings windows and dialogs to rise normally, and added a dedicated Display Settings launcher. The signed APT repository introduced in 0.5.2 updates the application, Fuzzel/Labwc shell, keyboard defaults, settings integration, and Plymouth theme alongside the normal Raspberry Pi OS packages.
 
 Update artifacts and `latest.json` are published through [GitHub Releases](https://github.com/moonknight82/writing-environment/releases). Every application update is verified with Tauri's embedded public signing key before installation. The private key is held only in the repository's GitHub Actions secrets. macOS uses a signed Tauri application archive; Linux amd64 and Raspberry Pi use signed Debian packages and request system authorization when installation begins.
 

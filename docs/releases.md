@@ -1,6 +1,6 @@
 # Release process
 
-Writing Environment publishes signed application updates from the public GitHub repository. Source pushes run verification only; a matching semantic-version tag publishes a release.
+Writing Environment publishes signed application updates from the public GitHub repository. Source pushes run verification only; a matching semantic-version tag builds a release. The release remains a private draft until every signed desktop artifact, `latest.json`, Raspberry Pi appliance package, and APT deployment has completed, then becomes public in one final step. This prevents an incomplete release from becoming GitHub's `latest` release before its updater manifest exists.
 
 ## One-time repository setup
 
@@ -17,7 +17,7 @@ The current macOS package uses ad-hoc Apple code signing for personal testing. T
 3. Run `pnpm install --frozen-lockfile`, `pnpm build`, and `cargo test --manifest-path src-tauri/Cargo.toml`.
 4. Commit the release changes.
 5. Create and push a matching tag, such as `v0.3.1`.
-6. Watch the **Publish signed desktop release** workflow.
+6. Watch the **Publish signed desktop release** workflow. The draft release becomes public only after every required job succeeds.
 7. Confirm the GitHub Release contains `latest.json`, signed desktop artifacts, the Raspberry Pi manual archive, and the four appliance/repository packages.
 8. Confirm the Pages deployment publishes a valid signed APT repository at `https://moonknight82.github.io/writing-environment/apt`.
 9. Test both **Writer (Aa) → Application updates → Check for Updates…** and **Super+Space → Updates** before relying on automatic checks.
