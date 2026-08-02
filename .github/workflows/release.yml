@@ -45,14 +45,17 @@ jobs:
           release_id="$(find_release_id)"
 
           if [[ -z "$release_id" ]]; then
-            gh release create "$tag" \
-              --target "$GITHUB_SHA" \
-              --title "Writing Environment ${tag}" \
-              --draft \
-              --notes-file .github/release-notes.md
-            # The release-by-tag endpoint does not expose drafts. Look it up
-            # through the authenticated release list after creation instead.
-            release_id="$(find_release_id)"
+            # Capture the ID from the creation response. A newly created draft
+            # can take several seconds to appear in the releases listing.
+            release_id="$(gh api \
+              --method POST \
+              "repos/${GITHUB_REPOSITORY}/releases" \
+              -f tag_name="$tag" \
+              -f target_commitish="$GITHUB_SHA" \
+              -f name="Writing Environment ${tag}" \
+              -f body="$(cat .github/release-notes.md)" \
+              -F draft=true \
+              --jq '.id')"
           fi
 
           [[ -n "$release_id" ]] || {
