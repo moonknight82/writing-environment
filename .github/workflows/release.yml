@@ -15,11 +15,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Verify release tag and application version
-        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
-          version="$(node -p "require('./package.json').version")"
-          test "${GITHUB_REF_NAME}" = "v${version}"
+          release_tag=""
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            release_tag="${GITHUB_REF_NAME}"
+          fi
+          RELEASE_TAG="$release_tag" scripts/release/verify.sh
 
   prepare-release:
     needs: verify-version
@@ -122,16 +124,6 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ matrix.apple_identity }}
         with:
           releaseId: ${{ needs.prepare-release.outputs.release_id }}
-          releaseBody: |
-            Removes Raspberry Pi's Desktop/Taskbar appearance plugin from the panel-free Writing Environment appliance. Its controls target PCManFM's desktop and wf-panel-pi, which the appliance deliberately does not run.
-
-            Toggling options such as Show Home Folder previously launched pcmanfm --reconfigure synchronously. With no existing desktop process, that command remained open and blocked Control Centre. The incompatible Desktop, Taskbar, Appearance, and Defaults pages are now absent; Screens, mouse and keyboard, Raspberry Pi system configuration, and Bluetooth remain available.
-
-            The signed APT repository continues to update the application and appliance shell together with Raspberry Pi OS through the Super+Space Updates action. Fresh flashable images include this fix.
-
-            Signed desktop release for macOS Apple Silicon, Linux amd64, and Raspberry Pi ARM64.
-
-            This is a personal project under active development. Back up important writing and review the release notes before updating.
           releaseDraft: true
           prerelease: false
           uploadUpdaterJson: true

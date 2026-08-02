@@ -63,6 +63,32 @@
     lastSheetPath: string | null;
   }
 
+  interface SearchLocation {
+    id: string;
+    name: string;
+    path: string;
+    kind: "inbox" | "project";
+  }
+
+  interface GlobalSheetResult {
+    location: SearchLocation;
+    sheet: SheetSummary;
+    sourceRank: number;
+  }
+
+  interface StoredSheetReference {
+    locationId: string;
+    locationName: string;
+    root: string;
+    kind: "inbox" | "project";
+    relativePath: string;
+    title: string;
+    group: string;
+    wordCount: number;
+    createdAt: string;
+    lastOpened: number;
+  }
+
   interface ExportPreset {
     id: string;
     name: string;
@@ -78,7 +104,8 @@
   type WritingFocusMode = "off" | "paragraph" | "sentence";
   type EditorMode = "write" | "preview";
   type SheetSort = "created-desc" | "created-asc" | "title-asc" | "title-desc";
-  type ExportScope = "sheet" | "folder" | "project";
+  type ExportScope = "sheet" | "selection" | "folder" | "project";
+  type BulkSheetAction = "move" | "trash";
 
   type SheetDialogMode = "create" | "rename" | "move" | "trash";
 
@@ -132,6 +159,9 @@
   const EXPORT_PRESETS_KEY = "writing-environment.export-presets";
   const EXPORT_AUTHOR_KEY = "writing-environment.export-author";
   const EXPORT_LANGUAGE_KEY = "writing-environment.export-language";
+  const RECENT_SHEETS_KEY = "writing-environment.recent-sheets";
+  const FAVORITE_SHEETS_KEY = "writing-environment.favorite-sheets";
+  const RECENT_SHEET_LIMIT = 40;
 
   const prototypeSheets: SheetSummary[] = [
     {
@@ -287,10 +317,30 @@ It passed the abandoned signal house before descending between black pines to th
   let trashActive = false;
   let trashOriginFilter = "all";
   let searchQuery = "";
-  let searchResults: SheetSummary[] = [];
+  let searchResults: GlobalSheetResult[] = [];
   let searching = false;
+  let searchNotice = "";
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
+  let searchRequest = 0;
+  let quickSwitcherVisible = false;
+  let quickSwitcherQuery = "";
+  let quickSwitcherResults: GlobalSheetResult[] = [];
+  let quickSwitcherSearching = false;
+  let quickSwitcherNotice = "";
+  let quickSwitcherIndex = 0;
+  let quickSwitcherTimer: ReturnType<typeof setTimeout> | undefined;
+  let quickSwitcherRequest = 0;
+  let quickSwitcherInput: HTMLInputElement;
+  let recentSheets: StoredSheetReference[] = [];
+  let favoriteSheets: StoredSheetReference[] = [];
+  let favoriteSheetKeys = new Set<string>();
   let sheetActionsPath: string | null = null;
+  let sheetSelectionMode = false;
+  let selectedSheetPaths = new Set<string>();
+  let selectedSheets: SheetSummary[] = [];
+  let selectedVisibleSheetCount = 0;
+  let bulkSheetAction: BulkSheetAction | null = null;
+  let bulkActionError = "";
   let sheetDialogMode: SheetDialogMode | null = null;
   let dialogSheet: SheetSummary | null = null;
   let dialogTitle = "";
@@ -372,14 +422,19 @@ It passed the abandoned signal house before descending between black pines to th
   let updateCheckTimer: ReturnType<typeof setTimeout> | undefined;
 
   $: visibleSheets = sortSheets(
-    searchQuery.trim()
-      ? searchResults
-      : activeGroup === "All Sheets" || inboxActive
-        ? sheets
-        : sheets.filter((sheet) => sheetIsInFolder(sheet, activeGroup)),
+    activeGroup === "All Sheets" || inboxActive
+      ? sheets
+      : sheets.filter((sheet) => sheetIsInFolder(sheet, activeGroup)),
     sheetSort,
   );
   $: previewHtml = editorMode === "preview" ? renderMarkdownPreview(content) : "";
+  $: favoriteSheetKeys = new Set(
+    favoriteSheets.map((item) => sheetReferenceKey(item.root, item.relativePath)),
+  );
+  $: selectedSheets = sheets.filter((sheet) => selectedSheetPaths.has(sheet.relativePath));
+  $: selectedVisibleSheetCount = visibleSheets.filter(
+    (sheet) => selectedSheetPaths.has(sheet.relativePath),
+  ).length;
   $: sortedProjects = [...projects].sort(
     (left, right) => Number(right.pinned) - Number(left.pinned) || right.lastOpened - left.lastOpened,
   );
@@ -406,18 +461,28 @@ It passed the abandoned signal house before descending between black pines to th
     exportScope = "project";
     exportTitlePage = true;
   }
+  $: if (exportScope === "selection" && selectedSheets.length === 0) {
+    exportScope = "sheet";
+    exportTitlePage = false;
+  }
   $: exportSelectedCount = exportScope === "sheet"
     ? Number(Boolean(activeSheetPath))
+    : exportScope === "selection"
+      ? selectedSheets.length
     : exportScope === "folder" && activeGroup !== "All Sheets" && activeGroup !== "Inbox"
       ? sheets.filter((sheet) => sheetIsInFolder(sheet, activeGroup)).length
       : sheets.length;
   $: exportSummary = exportScope === "sheet"
     ? "The open sheet"
+    : exportScope === "selection"
+      ? `${exportSelectedCount} selected ${exportSelectedCount === 1 ? "sheet" : "sheets"}`
     : exportScope === "folder"
       ? `${exportSelectedCount} ${exportSelectedCount === 1 ? "sheet" : "sheets"} in this folder`
       : `${exportSelectedCount} ${exportSelectedCount === 1 ? "sheet" : "sheets"} in ${inboxActive ? "Inbox" : "this project"}`;
   $: currentExportTitle = exportScope === "sheet"
     ? activeSheet
+    : exportScope === "selection"
+      ? libraryName
     : exportScope === "folder" && activeGroup !== "All Sheets" && activeGroup !== "Inbox"
       ? activeGroup.split("/").at(-1) || activeGroup
       : libraryName;
@@ -459,6 +524,8 @@ It passed the abandoned signal house before descending between black pines to th
       syncDraftPath = universalSyncConfig.remoteRoot;
       updateUniversalSyncSummary();
     }
+    recentSheets = loadSheetReferences(RECENT_SHEETS_KEY);
+    favoriteSheets = loadSheetReferences(FAVORITE_SHEETS_KEY);
     reopenLastWorkspace = storedReopenPreference !== "false";
     if (!reopenLastWorkspace) localStorage.removeItem("writing-environment.last-workspace");
     spellCheckEnabled = storedSpellCheck !== "false";
@@ -479,6 +546,15 @@ It passed the abandoned signal house before descending between black pines to th
     if (!desktopMode) {
       content = readPrototypeSheet(activeSheetPath);
       persistedContent = content;
+      const prototypeSheet = sheets.find((sheet) => sheet.relativePath === activeSheetPath);
+      if (prototypeSheet) {
+        rememberSheetVisit({
+          id: "prototype",
+          name: libraryName,
+          path: prototypeProjectPath,
+          kind: "project",
+        }, prototypeSheet);
+      }
     }
     registerSessionSheet();
 
@@ -497,6 +573,7 @@ It passed the abandoned signal house before descending between black pines to th
     componentDestroyed = true;
     if (saveTimer) clearTimeout(saveTimer);
     if (searchTimer) clearTimeout(searchTimer);
+    if (quickSwitcherTimer) clearTimeout(quickSwitcherTimer);
     if (syncTimer) clearTimeout(syncTimer);
     if (syncInterval) clearInterval(syncInterval);
     if (libraryRefreshTimer) clearTimeout(libraryRefreshTimer);
@@ -862,6 +939,51 @@ It passed the abandoned signal house before descending between black pines to th
   }
 
   function handleWindowKeydown(event: KeyboardEvent): void {
+    if (quickSwitcherVisible) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeQuickSwitcher();
+        return;
+      }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        moveQuickSwitcherSelection(event.key === "ArrowDown" ? 1 : -1);
+        return;
+      }
+      if (event.key === "Enter") {
+        const result = quickSwitcherResults[quickSwitcherIndex];
+        if (result) {
+          event.preventDefault();
+          void openGlobalSearchResult(result);
+        }
+        return;
+      }
+    }
+
+    if (
+      (event.metaKey || event.ctrlKey)
+      && !event.shiftKey
+      && !event.altKey
+      && event.key.toLowerCase() === "p"
+    ) {
+      event.preventDefault();
+      openQuickSwitcher();
+      return;
+    }
+
+    if (sheetSelectionMode && !bulkSheetAction && !exportMenuVisible) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        exitSheetSelection();
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "a") {
+        event.preventDefault();
+        selectAllVisibleSheets();
+        return;
+      }
+    }
+
     if (event.key === "F11") {
       event.preventDefault();
       void toggleAppFullscreen();
@@ -885,6 +1007,46 @@ It passed the abandoned signal house before descending between black pines to th
     const target = event.target;
     if (target instanceof Element && target.closest(".project-row")) return;
     projectMenuPath = null;
+  }
+
+  function openQuickSwitcher(): void {
+    if (
+      sheetDialogMode
+      || bulkSheetAction
+      || emptyTrashConfirmVisible
+      || syncInitializationConfirmVisible
+      || updateVisible
+      || historyVisible
+    ) return;
+    closeToolbarMenus();
+    quickSwitcherVisible = true;
+    quickSwitcherQuery = "";
+    quickSwitcherResults = currentLibrarySuggestions();
+    quickSwitcherIndex = 0;
+    quickSwitcherNotice = quickSwitcherResults.length > 0
+      ? favoriteSheets.length > 0 ? "Favorites and recent sheets" : "Recent sheets"
+      : "Type to search Inbox and every open project.";
+    requestAnimationFrame(() => quickSwitcherInput?.focus());
+  }
+
+  function closeQuickSwitcher(): void {
+    if (quickSwitcherTimer) clearTimeout(quickSwitcherTimer);
+    quickSwitcherTimer = undefined;
+    quickSwitcherRequest += 1;
+    quickSwitcherVisible = false;
+    quickSwitcherSearching = false;
+    quickSwitcherNotice = "";
+  }
+
+  function moveQuickSwitcherSelection(direction: 1 | -1): void {
+    const count = quickSwitcherResults.length;
+    if (count === 0) return;
+    quickSwitcherIndex = (quickSwitcherIndex + direction + count) % count;
+    requestAnimationFrame(() => {
+      document.getElementById(`quick-result-${quickSwitcherIndex}`)?.scrollIntoView({
+        block: "nearest",
+      });
+    });
   }
 
   function selectTheme(themeId: string): void {
@@ -1192,6 +1354,8 @@ It passed the abandoned signal house before descending between black pines to th
       dirty = false;
       saveStatus = "Saved locally";
       errorMessage = "";
+      const location = currentSearchLocation();
+      if (location) rememberSheetVisit(location, sheet);
       return;
     }
 
@@ -1204,6 +1368,8 @@ It passed the abandoned signal house before descending between black pines to th
       dirty = false;
       saveStatus = "Saved locally";
       errorMessage = "";
+      const location = currentSearchLocation();
+      if (location) rememberSheetVisit(location, sheet);
       if (inboxActive) {
         localStorage.setItem("writing-environment.last-inbox-sheet", sheet.relativePath);
       } else {
@@ -1267,6 +1433,7 @@ It passed the abandoned signal house before descending between black pines to th
     }
 
     if (project.path === libraryPath) {
+      resetSheetSelectionState();
       trashActive = false;
       const current = activeSheetPath
         ? sheets.find((sheet) => sheet.relativePath === activeSheetPath)
@@ -1302,12 +1469,89 @@ It passed the abandoned signal house before descending between black pines to th
     sortMenuVisible = false;
   }
 
+  function enterSheetSelection(): void {
+    if (trashActive || searchQuery.trim() || visibleSheets.length === 0) return;
+    sheetSelectionMode = true;
+    selectedSheetPaths = new Set();
+    sheetActionsPath = null;
+    sortMenuVisible = false;
+  }
+
+  function exitSheetSelection(): void {
+    if (mutatingLibrary) return;
+    resetSheetSelectionState();
+  }
+
+  function resetSheetSelectionState(): void {
+    sheetSelectionMode = false;
+    selectedSheetPaths = new Set();
+    bulkSheetAction = null;
+    bulkActionError = "";
+  }
+
+  function toggleSheetSelection(relativePath: string): void {
+    const next = new Set(selectedSheetPaths);
+    if (next.has(relativePath)) next.delete(relativePath);
+    else next.add(relativePath);
+    selectedSheetPaths = next;
+  }
+
+  function selectAllVisibleSheets(): void {
+    const next = new Set(selectedSheetPaths);
+    const allVisibleSelected = visibleSheets.length > 0
+      && visibleSheets.every((sheet) => next.has(sheet.relativePath));
+    for (const sheet of visibleSheets) {
+      if (allVisibleSelected) next.delete(sheet.relativePath);
+      else next.add(sheet.relativePath);
+    }
+    selectedSheetPaths = next;
+  }
+
+  function openBulkSheetAction(action: BulkSheetAction): void {
+    if (!desktopAvailable() || !libraryPath || selectedSheets.length === 0) return;
+    bulkSheetAction = action;
+    bulkActionError = "";
+    dialogProjectPath = inboxActive
+      ? sortedProjects.find((project) => project.open)?.path ?? ""
+      : libraryPath;
+    dialogGroup = inboxActive
+      ? "Draft"
+      : activeGroup !== "All Sheets" && activeGroup !== "Inbox"
+        ? activeGroup
+        : folders[0]?.path ?? "Draft";
+    dialogFolders = inboxActive ? [] : folders;
+    if (action === "move" && dialogProjectPath) {
+      void loadDialogProjectFolders(dialogProjectPath);
+    }
+  }
+
+  function closeBulkSheetAction(): void {
+    if (mutatingLibrary) return;
+    bulkSheetAction = null;
+    bulkActionError = "";
+  }
+
+  function openSelectedSheetExport(): void {
+    if (!desktopAvailable() || !libraryPath || selectedSheets.length === 0) return;
+    exportScope = "selection";
+    exportTitlePage = true;
+    exportTitle = "";
+    selectedExportPresetId = "";
+    exportMenuVisible = true;
+    syncMenuVisible = false;
+    goalMenuVisible = false;
+    focusMenuVisible = false;
+    writerMenuVisible = false;
+    themeMenuVisible = false;
+  }
+
   async function selectUniversalTrash(): Promise<void> {
     if (dirty && !(await persistCurrentSheet())) return;
     trashActive = true;
     activeGroup = "Trash";
     searchQuery = "";
     searchResults = [];
+    exitSheetSelection();
     sheetActionsPath = null;
     sortMenuVisible = false;
     try {
@@ -1374,6 +1618,7 @@ It passed the abandoned signal house before descending between black pines to th
   }
 
   function clearWorkspace(): void {
+    resetSheetSelectionState();
     inboxActive = false;
     trashActive = false;
     libraryPath = null;
@@ -1407,6 +1652,7 @@ It passed the abandoned signal house before descending between black pines to th
       ? await readLibrarySheet(selected.path, firstSheet.relativePath)
       : "";
 
+    resetSheetSelectionState();
     inboxActive = false;
     trashActive = false;
     libraryName = selected.name;
@@ -1435,6 +1681,14 @@ It passed the abandoned signal house before descending between black pines to th
     dirty = false;
     clearExternalConflict();
     saveStatus = firstSheet ? "Saved locally" : "No sheet open";
+    if (firstSheet) {
+      rememberSheetVisit({
+        id: selected.projectId ?? projects.find((project) => project.path === selected.path)?.id ?? selected.path,
+        name: selected.name,
+        path: selected.path,
+        kind: "project",
+      }, firstSheet);
+    }
     await refreshUniversalTrash();
     rememberLastWorkspace();
     errorMessage = libraryWarningMessage(selected);
@@ -1452,6 +1706,7 @@ It passed the abandoned signal house before descending between black pines to th
       ? await readLibrarySheet(selected.path, firstSheet.relativePath)
       : "";
 
+    resetSheetSelectionState();
     if (syncTimer) clearTimeout(syncTimer);
     syncTimer = undefined;
     syncMenuVisible = false;
@@ -1489,6 +1744,9 @@ It passed the abandoned signal house before descending between black pines to th
     dirty = false;
     clearExternalConflict();
     saveStatus = firstSheet ? "Saved locally" : "No sheet open";
+    if (firstSheet) {
+      rememberSheetVisit({ id: "inbox", name: "Inbox", path: selected.path, kind: "inbox" }, firstSheet);
+    }
     errorMessage = libraryWarningMessage(selected);
     await refreshUniversalTrash();
     await watchActiveLibrary(selected.path);
@@ -2096,7 +2354,7 @@ It passed the abandoned signal house before descending between black pines to th
   }
 
   function isExportScope(value: unknown): value is ExportScope {
-    return value === "sheet" || value === "folder" || value === "project";
+    return value === "sheet" || value === "selection" || value === "folder" || value === "project";
   }
 
   function loadExportPresets(): ExportPreset[] {
@@ -2196,7 +2454,9 @@ It passed the abandoned signal house before descending between black pines to th
     }
     const presetScope = preset.scope === "folder" && (activeGroup === "All Sheets" || activeGroup === "Inbox")
       ? "project"
-      : preset.scope;
+      : preset.scope === "selection" && selectedSheets.length === 0
+        ? "sheet"
+        : preset.scope;
     exportScope = presetScope;
     selectedExportPresetId = presetScope === preset.scope ? id : "";
     exportTitle = preset.title;
@@ -2224,6 +2484,7 @@ It passed the abandoned signal house before descending between black pines to th
       const active = sheets.find((sheet) => sheet.relativePath === activeSheetPath);
       return active ? [active] : [];
     }
+    if (exportScope === "selection") return sortSheets(selectedSheets, exportSort);
     const source = exportScope === "folder"
       && activeGroup !== "All Sheets"
       && activeGroup !== "Inbox"
@@ -2235,6 +2496,7 @@ It passed the abandoned signal house before descending between black pines to th
   function exportDocumentTitle(): string {
     if (exportTitle.trim()) return exportTitle.trim();
     if (exportScope === "sheet") return activeSheet;
+    if (exportScope === "selection") return libraryName;
     if (exportScope === "folder" && activeGroup !== "All Sheets" && activeGroup !== "Inbox") {
       return activeGroup.split("/").at(-1) || activeGroup;
     }
@@ -2489,36 +2751,408 @@ It passed the abandoned signal house before descending between black pines to th
   }
 
   function handleSearchInput(value: string): void {
+    if (value.trim() && sheetSelectionMode) resetSheetSelectionState();
     searchQuery = value;
     if (searchTimer) clearTimeout(searchTimer);
+    searchRequest += 1;
+    const request = searchRequest;
     if (!value.trim()) {
       searchResults = [];
       searching = false;
-      return;
-    }
-
-    if (!libraryPath || !desktopAvailable()) {
-      const terms = value.toLowerCase().split(/\s+/).filter(Boolean);
-      searchResults = sheets.filter((sheet) => {
-        const text = `${sheet.title} ${sheet.excerpt}`.toLowerCase();
-        return terms.every((term) => text.includes(term));
-      });
+      searchNotice = "";
       return;
     }
 
     searching = true;
-    const requestedQuery = value;
+    searchNotice = "";
+    const requestedQuery = value.trim();
     searchTimer = setTimeout(async () => {
-      try {
-        const results = await searchLibrary(libraryPath!, requestedQuery);
-        if (searchQuery === requestedQuery) searchResults = results;
-        errorMessage = "";
-      } catch (error) {
-        errorMessage = error instanceof Error ? error.message : String(error);
-      } finally {
-        if (searchQuery === requestedQuery) searching = false;
-      }
+      const response = await searchEverywhere(requestedQuery);
+      if (request !== searchRequest) return;
+      searchResults = response.results;
+      searchNotice = response.notice;
+      searching = false;
     }, 180);
+  }
+
+  function handleQuickSwitcherInput(value: string): void {
+    quickSwitcherQuery = value;
+    quickSwitcherIndex = 0;
+    if (quickSwitcherTimer) clearTimeout(quickSwitcherTimer);
+    quickSwitcherRequest += 1;
+    const request = quickSwitcherRequest;
+    if (!value.trim()) {
+      quickSwitcherResults = currentLibrarySuggestions();
+      quickSwitcherSearching = false;
+      quickSwitcherNotice = quickSwitcherResults.length > 0
+        ? favoriteSheets.length > 0 ? "Favorites and recent sheets" : "Recent sheets"
+        : "Type to search Inbox and every open project.";
+      return;
+    }
+
+    quickSwitcherSearching = true;
+    quickSwitcherNotice = "";
+    const requestedQuery = value.trim();
+    quickSwitcherTimer = setTimeout(async () => {
+      const response = await searchEverywhere(requestedQuery);
+      if (request !== quickSwitcherRequest || !quickSwitcherVisible) return;
+      quickSwitcherResults = response.results.slice(0, 40);
+      quickSwitcherNotice = response.notice;
+      quickSwitcherSearching = false;
+    }, 120);
+  }
+
+  function availableSearchLocations(): SearchLocation[] {
+    if (!desktopAvailable()) {
+      return [{
+        id: inboxActive ? "inbox" : activeProjectPath ?? "prototype",
+        name: libraryName,
+        path: libraryPath ?? prototypeProjectPath,
+        kind: inboxActive ? "inbox" : "project",
+      }];
+    }
+
+    const locations: SearchLocation[] = [];
+    const seen = new Set<string>();
+    if (inboxPath) {
+      locations.push({ id: "inbox", name: "Inbox", path: inboxPath, kind: "inbox" });
+      seen.add(inboxPath);
+    }
+    for (const project of sortedProjects) {
+      if (!project.open || seen.has(project.path)) continue;
+      locations.push({
+        id: project.id,
+        name: project.name,
+        path: project.path,
+        kind: "project",
+      });
+      seen.add(project.path);
+    }
+    if (libraryPath && !seen.has(libraryPath)) {
+      locations.push({
+        id: inboxActive ? "inbox" : activeProjectPath ?? libraryPath,
+        name: libraryName,
+        path: libraryPath,
+        kind: inboxActive ? "inbox" : "project",
+      });
+    }
+    return locations;
+  }
+
+  function currentSearchLocation(): SearchLocation | null {
+    if (!desktopAvailable()) return availableSearchLocations()[0] ?? null;
+    if (!libraryPath) return null;
+    return availableSearchLocations().find((location) => location.path === libraryPath) ?? {
+      id: inboxActive ? "inbox" : activeProjectPath ?? libraryPath,
+      name: libraryName,
+      path: libraryPath,
+      kind: inboxActive ? "inbox" : "project",
+    };
+  }
+
+  function currentLibrarySuggestions(): GlobalSheetResult[] {
+    const location = currentSearchLocation();
+    const results: GlobalSheetResult[] = [];
+    const seen = new Set<string>();
+    const appendReference = (reference: StoredSheetReference) => {
+      const key = sheetReferenceKey(reference.root, reference.relativePath);
+      if (seen.has(key)) return;
+      seen.add(key);
+      results.push(sheetReferenceToResult(reference, results.length));
+    };
+    favoriteSheets.forEach(appendReference);
+    recentSheets.forEach(appendReference);
+    if (location) {
+      for (const sheet of sortSheets(sheets, "created-desc")) {
+        const key = sheetReferenceKey(location.path, sheet.relativePath);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        results.push({ location, sheet, sourceRank: results.length });
+        if (results.length >= 20) break;
+      }
+    }
+    return results.slice(0, 20);
+  }
+
+  function sheetReferenceKey(root: string, relativePath: string): string {
+    return `${root}\u0000${relativePath}`;
+  }
+
+  function storedSheetReference(
+    location: SearchLocation,
+    sheet: SheetSummary,
+    lastOpened = Date.now(),
+  ): StoredSheetReference {
+    return {
+      locationId: location.id,
+      locationName: location.name,
+      root: location.path,
+      kind: location.kind,
+      relativePath: sheet.relativePath,
+      title: sheet.title,
+      group: sheet.group,
+      wordCount: sheet.wordCount,
+      createdAt: sheet.createdAt,
+      lastOpened,
+    };
+  }
+
+  function sheetReferenceToResult(
+    reference: StoredSheetReference,
+    sourceRank: number,
+  ): GlobalSheetResult {
+    return {
+      location: {
+        id: reference.locationId,
+        name: reference.locationName,
+        path: reference.root,
+        kind: reference.kind,
+      },
+      sheet: {
+        title: reference.title,
+        relativePath: reference.relativePath,
+        group: reference.group,
+        excerpt: "",
+        wordCount: reference.wordCount,
+        createdAt: reference.createdAt,
+      },
+      sourceRank,
+    };
+  }
+
+  function loadSheetReferences(storageKey: string): StoredSheetReference[] {
+    try {
+      const value: unknown = JSON.parse(localStorage.getItem(storageKey) ?? "[]");
+      if (!Array.isArray(value)) return [];
+      const seen = new Set<string>();
+      const references: StoredSheetReference[] = [];
+      for (const candidate of value) {
+        if (
+          typeof candidate !== "object"
+          || candidate === null
+          || !("locationId" in candidate) || typeof candidate.locationId !== "string"
+          || !("locationName" in candidate) || typeof candidate.locationName !== "string"
+          || !("root" in candidate) || typeof candidate.root !== "string"
+          || !("kind" in candidate) || (candidate.kind !== "inbox" && candidate.kind !== "project")
+          || !("relativePath" in candidate) || typeof candidate.relativePath !== "string"
+          || !("title" in candidate) || typeof candidate.title !== "string"
+          || !("group" in candidate) || typeof candidate.group !== "string"
+          || !("wordCount" in candidate) || typeof candidate.wordCount !== "number"
+          || !("createdAt" in candidate) || typeof candidate.createdAt !== "string"
+          || !("lastOpened" in candidate) || typeof candidate.lastOpened !== "number"
+        ) continue;
+        const reference = candidate as StoredSheetReference;
+        const key = sheetReferenceKey(reference.root, reference.relativePath);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        references.push(reference);
+      }
+      return references;
+    } catch {
+      return [];
+    }
+  }
+
+  function saveSheetReferences(): void {
+    localStorage.setItem(RECENT_SHEETS_KEY, JSON.stringify(recentSheets));
+    localStorage.setItem(FAVORITE_SHEETS_KEY, JSON.stringify(favoriteSheets));
+  }
+
+  function rememberSheetVisit(location: SearchLocation, sheet: SheetSummary): void {
+    const reference = storedSheetReference(location, sheet);
+    const key = sheetReferenceKey(location.path, sheet.relativePath);
+    recentSheets = [
+      reference,
+      ...recentSheets.filter((item) => sheetReferenceKey(item.root, item.relativePath) !== key),
+    ].slice(0, RECENT_SHEET_LIMIT);
+    favoriteSheets = favoriteSheets.map((item) =>
+      sheetReferenceKey(item.root, item.relativePath) === key
+        ? { ...reference, lastOpened: item.lastOpened }
+        : item,
+    );
+    saveSheetReferences();
+  }
+
+  function isFavoriteSheet(root: string, relativePath: string): boolean {
+    return favoriteSheetKeys.has(sheetReferenceKey(root, relativePath));
+  }
+
+  function toggleSheetFavorite(sheet: SheetSummary): void {
+    const location = currentSearchLocation();
+    if (!location) return;
+    const key = sheetReferenceKey(location.path, sheet.relativePath);
+    if (isFavoriteSheet(location.path, sheet.relativePath)) {
+      favoriteSheets = favoriteSheets.filter(
+        (item) => sheetReferenceKey(item.root, item.relativePath) !== key,
+      );
+    } else {
+      favoriteSheets = [storedSheetReference(location, sheet), ...favoriteSheets];
+    }
+    saveSheetReferences();
+    sheetActionsPath = null;
+  }
+
+  function removeSheetReferences(root: string, relativePath: string): void {
+    const key = sheetReferenceKey(root, relativePath);
+    recentSheets = recentSheets.filter(
+      (item) => sheetReferenceKey(item.root, item.relativePath) !== key,
+    );
+    favoriteSheets = favoriteSheets.filter(
+      (item) => sheetReferenceKey(item.root, item.relativePath) !== key,
+    );
+    saveSheetReferences();
+  }
+
+  function relocateSheetReferences(
+    sourceRoot: string,
+    sourceRelativePath: string,
+    destination: SearchLocation,
+    sheet: SheetSummary,
+  ): void {
+    const sourceKey = sheetReferenceKey(sourceRoot, sourceRelativePath);
+    const relocate = (item: StoredSheetReference) =>
+      sheetReferenceKey(item.root, item.relativePath) === sourceKey
+        ? storedSheetReference(destination, sheet, item.lastOpened)
+        : item;
+    recentSheets = deduplicateSheetReferences(recentSheets.map(relocate));
+    favoriteSheets = deduplicateSheetReferences(favoriteSheets.map(relocate));
+    saveSheetReferences();
+  }
+
+  function deduplicateSheetReferences(source: StoredSheetReference[]): StoredSheetReference[] {
+    const seen = new Set<string>();
+    return source.filter((item) => {
+      const key = sheetReferenceKey(item.root, item.relativePath);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function searchLocationForPath(path: string, fallbackName: string): SearchLocation {
+    if (path === inboxPath) return { id: "inbox", name: "Inbox", path, kind: "inbox" };
+    const project = projects.find((candidate) => candidate.path === path);
+    return {
+      id: project?.id ?? path,
+      name: project?.name ?? fallbackName,
+      path,
+      kind: "project",
+    };
+  }
+
+  async function searchEverywhere(
+    query: string,
+  ): Promise<{ results: GlobalSheetResult[]; notice: string }> {
+    const locations = availableSearchLocations();
+    if (!query || locations.length === 0) return { results: [], notice: "" };
+
+    if (!desktopAvailable()) {
+      const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+      const location = locations[0];
+      const results = sheets
+        .filter((sheet) => {
+          const text = `${sheet.title} ${sheet.excerpt}`.toLowerCase();
+          return terms.every((term) => text.includes(term));
+        })
+        .map((sheet, sourceRank) => ({ location, sheet, sourceRank }));
+      return { results: rankGlobalResults(results, query), notice: "" };
+    }
+
+    const settled = await Promise.allSettled(
+      locations.map(async (location) => ({
+        location,
+        sheets: await searchLibrary(location.path, query),
+      })),
+    );
+    const results: GlobalSheetResult[] = [];
+    let failures = 0;
+    for (const outcome of settled) {
+      if (outcome.status === "rejected") {
+        failures += 1;
+        continue;
+      }
+      outcome.value.sheets.forEach((sheet, sourceRank) => {
+        results.push({ location: outcome.value.location, sheet, sourceRank });
+      });
+    }
+    return {
+      results: rankGlobalResults(results, query).slice(0, 200),
+      notice: failures > 0
+        ? `${failures} ${failures === 1 ? "location was" : "locations were"} unavailable.`
+        : "",
+    };
+  }
+
+  function rankGlobalResults(results: GlobalSheetResult[], query: string): GlobalSheetResult[] {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    return [...results].sort((left, right) => {
+      const leftTitle = left.sheet.title.toLocaleLowerCase();
+      const rightTitle = right.sheet.title.toLocaleLowerCase();
+      const titleRank = (title: string) => title === normalizedQuery
+        ? 0
+        : title.startsWith(normalizedQuery)
+          ? 1
+          : title.includes(normalizedQuery) ? 2 : 3;
+      return titleRank(leftTitle) - titleRank(rightTitle)
+        || left.sourceRank - right.sourceRank
+        || left.sheet.title.localeCompare(right.sheet.title, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        })
+        || left.location.name.localeCompare(right.location.name);
+    });
+  }
+
+  async function openGlobalSearchResult(result: GlobalSheetResult): Promise<void> {
+    if (loadingLibrary) return;
+    closeQuickSwitcher();
+    searchQuery = "";
+    searchResults = [];
+    searchNotice = "";
+
+    if (!desktopAvailable()) {
+      await selectSheet(result.sheet);
+      return;
+    }
+    if (result.location.path === libraryPath) {
+      const currentSheet = sheets.find(
+        (sheet) => sheet.relativePath === result.sheet.relativePath,
+      );
+      if (!currentSheet) {
+        removeSheetReferences(result.location.path, result.sheet.relativePath);
+        errorMessage = `${result.sheet.title} is no longer in ${result.location.name}.`;
+        return;
+      }
+      trashActive = false;
+      await selectSheet(currentSheet);
+      return;
+    }
+    if (dirty && !(await persistCurrentSheet())) return;
+
+    loadingLibrary = true;
+    errorMessage = "";
+    try {
+      const snapshot = result.location.kind === "inbox"
+        ? await openInboxLibrary()
+        : await openLibraryPath(result.location.path);
+      const target = snapshot.sheets.find(
+        (sheet) => sheet.relativePath === result.sheet.relativePath,
+      );
+      if (!target) {
+        removeSheetReferences(result.location.path, result.sheet.relativePath);
+        errorMessage = `${result.sheet.title} is no longer in ${result.location.name}.`;
+        return;
+      }
+      if (result.location.kind === "inbox") {
+        await activateInbox(snapshot, target.relativePath);
+      } else {
+        await activateLibrary(snapshot, target.relativePath);
+      }
+    } catch (error) {
+      errorMessage = `Cannot open ${result.sheet.title}: ${errorText(error)}`;
+    } finally {
+      loadingLibrary = false;
+    }
   }
 
   function openSheetDialog(mode: SheetDialogMode, sheet: SheetSummary | null = null): void {
@@ -2554,16 +3188,22 @@ It passed the abandoned signal house before descending between black pines to th
     dialogProjectPath = projectPath;
     try {
       const snapshot = await openLibraryPath(projectPath);
-      if (dialogProjectPath !== projectPath || sheetDialogMode !== "move") return;
+      if (
+        dialogProjectPath !== projectPath
+        || (sheetDialogMode !== "move" && bulkSheetAction !== "move")
+      ) return;
       dialogFolders = folderSummaries(snapshot.sheets);
       if (inboxActive && dialogGroup === "Ungrouped") {
         dialogGroup = dialogFolders[0]?.path ?? "Draft";
       }
-      dialogError = "";
+      if (bulkSheetAction === "move") bulkActionError = "";
+      else dialogError = "";
     } catch (error) {
       if (dialogProjectPath === projectPath) {
         dialogFolders = [];
-        dialogError = `Cannot inspect the destination project: ${errorText(error)}`;
+        const message = `Cannot inspect the destination project: ${errorText(error)}`;
+        if (bulkSheetAction === "move") bulkActionError = message;
+        else dialogError = message;
       }
     }
   }
@@ -2593,12 +3233,15 @@ It passed the abandoned signal house before descending between black pines to th
         dirty = false;
         await reloadLibrary(created.relativePath, true);
       } else if (sheetDialogMode === "rename" && dialogSheet) {
+        const sourcePath = dialogSheet.relativePath;
         const renamed = await renameLibrarySheet(
           libraryPath,
-          dialogSheet.relativePath,
+          sourcePath,
           dialogTitle,
         );
-        const wasActive = activeSheetPath === dialogSheet.relativePath;
+        const location = currentSearchLocation();
+        if (location) relocateSheetReferences(libraryPath, sourcePath, location, renamed);
+        const wasActive = activeSheetPath === sourcePath;
         dirty = false;
         await reloadLibrary(wasActive ? renamed.relativePath : activeSheetPath, wasActive);
       } else if (sheetDialogMode === "move" && dialogSheet) {
@@ -2616,6 +3259,17 @@ It passed the abandoned signal house before descending between black pines to th
             destinationProjectPath,
             dialogGroup,
           );
+        const destination = destinationProjectPath === sourceProjectPath
+          ? currentSearchLocation()
+          : searchLocationForPath(destinationProjectPath, "Project");
+        if (destination) {
+          relocateSheetReferences(
+            sourceProjectPath,
+            dialogSheet.relativePath,
+            destination,
+            moved,
+          );
+        }
         const wasActive = activeSheetPath === dialogSheet.relativePath;
         dirty = false;
         if (destinationProjectPath === sourceProjectPath) {
@@ -2630,6 +3284,7 @@ It passed the abandoned signal house before descending between black pines to th
       } else if (sheetDialogMode === "trash" && dialogSheet) {
         const wasActive = activeSheetPath === dialogSheet.relativePath;
         await trashLibrarySheet(libraryPath, dialogSheet.relativePath);
+        removeSheetReferences(libraryPath, dialogSheet.relativePath);
         dirty = false;
         await reloadLibrary(wasActive ? null : activeSheetPath, false);
       }
@@ -2639,6 +3294,91 @@ It passed the abandoned signal house before descending between black pines to th
       errorMessage = "";
     } catch (error) {
       dialogError = error instanceof Error ? error.message : String(error);
+    } finally {
+      mutatingLibrary = false;
+    }
+  }
+
+  async function submitBulkSheetAction(): Promise<void> {
+    if (!libraryPath || !bulkSheetAction || selectedSheets.length === 0) return;
+    const action = bulkSheetAction;
+    const sourceRoot = libraryPath;
+    const sourceWasInbox = inboxActive;
+    const targets = [...selectedSheets];
+    const remaining = new Set(selectedSheetPaths);
+    let preferredSheetPath = activeSheetPath;
+    let completed = 0;
+    let failure = "";
+    mutatingLibrary = true;
+    bulkActionError = "";
+
+    try {
+      if (dirty && !(await persistCurrentSheet())) {
+        throw new Error("Resolve the current sheet’s unsaved changes before modifying the library.");
+      }
+      if (action === "move" && !dialogProjectPath) {
+        throw new Error("Choose an open destination project.");
+      }
+
+      const destinationRoot = action === "move" ? dialogProjectPath || sourceRoot : sourceRoot;
+      const destination = action === "move"
+        ? destinationRoot === sourceRoot
+          ? currentSearchLocation()
+          : searchLocationForPath(destinationRoot, "Project")
+        : null;
+
+      for (const sheet of targets) {
+        try {
+          if (action === "move") {
+            const moved = destinationRoot === sourceRoot
+              ? await moveLibrarySheet(sourceRoot, sheet.relativePath, dialogGroup)
+              : await moveLibrarySheetToProject(
+                sourceRoot,
+                sheet.relativePath,
+                destinationRoot,
+                dialogGroup,
+              );
+            if (destination) {
+              relocateSheetReferences(
+                sourceRoot,
+                sheet.relativePath,
+                destination,
+                moved,
+              );
+            }
+            if (activeSheetPath === sheet.relativePath) {
+              preferredSheetPath = destinationRoot === sourceRoot ? moved.relativePath : null;
+            }
+          } else {
+            await trashLibrarySheet(sourceRoot, sheet.relativePath);
+            removeSheetReferences(sourceRoot, sheet.relativePath);
+            if (activeSheetPath === sheet.relativePath) preferredSheetPath = null;
+          }
+          remaining.delete(sheet.relativePath);
+          completed += 1;
+        } catch (error) {
+          failure = errorText(error);
+          break;
+        }
+      }
+
+      dirty = false;
+      selectedSheetPaths = remaining;
+      await reloadLibrary(preferredSheetPath, false);
+      if (!sourceWasInbox || action === "move") scheduleAutomaticSync();
+
+      if (failure) {
+        bulkActionError = `${completed} of ${targets.length} ${targets.length === 1 ? "sheet" : "sheets"} completed. ${failure}`;
+        return;
+      }
+
+      resetSheetSelectionState();
+      errorMessage = "";
+      saveStatus = action === "move"
+        ? `Moved ${completed} ${completed === 1 ? "sheet" : "sheets"}`
+        : `Moved ${completed} ${completed === 1 ? "sheet" : "sheets"} to Trash`;
+    } catch (error) {
+      bulkActionError = errorText(error);
     } finally {
       mutatingLibrary = false;
     }
@@ -3209,8 +3949,8 @@ It passed the abandoned signal house before descending between black pines to th
   <section class="sheet-list" aria-label="Sheets">
     <header class="panel-header">
       <div>
-        <p class="eyebrow">{trashActive ? "Recovery" : searchQuery.trim() ? (inboxActive ? "Inbox" : "Project") : inboxActive ? "Library" : "Folder"}</p>
-        <h1>{searchQuery.trim() ? "Search" : activeGroup}</h1>
+        <p class="eyebrow">{trashActive ? "Recovery" : sheetSelectionMode ? "Selection" : searchQuery.trim() ? "Everywhere" : inboxActive ? "Library" : "Folder"}</p>
+        <h1>{sheetSelectionMode ? `${selectedSheets.length} selected` : searchQuery.trim() ? "Global Search" : activeGroup}</h1>
       </div>
       <div class="panel-header-actions">
         {#if trashActive}
@@ -3231,7 +3971,15 @@ It passed the abandoned signal house before descending between black pines to th
             title={filteredTrashItems.length === 0 ? "This Trash view is already empty" : "Permanently empty this Trash view"}
             onclick={openEmptyTrashConfirmation}
           >Empty Trash</button>
+        {:else if sheetSelectionMode}
+          <button class="selection-done-button" onclick={exitSheetSelection}>Done</button>
         {:else}
+          <button
+            class="selection-start-button"
+            disabled={visibleSheets.length === 0 || Boolean(searchQuery.trim())}
+            title="Select multiple sheets"
+            onclick={enterSheetSelection}
+          >Select</button>
           <div class="sheet-sort-control">
             <button
               class:active={sortMenuVisible}
@@ -3276,13 +4024,33 @@ It passed the abandoned signal house before descending between black pines to th
       </div>
     </header>
 
-    {#if !trashActive}
+    {#if sheetSelectionMode}
+      <div class="sheet-selection-toolbar" role="toolbar" aria-label="Selected sheet actions">
+        <button onclick={selectAllVisibleSheets}>
+          {selectedVisibleSheetCount === visibleSheets.length && visibleSheets.length > 0 ? "Clear visible" : "Select all"}
+        </button>
+        <span></span>
+        <button
+          disabled={selectedSheets.length === 0 || !desktopAvailable() || !libraryPath || mutatingLibrary}
+          onclick={() => openBulkSheetAction("move")}
+        >Move</button>
+        <button
+          disabled={selectedSheets.length === 0 || !desktopAvailable() || !libraryPath || exportRunning}
+          onclick={openSelectedSheetExport}
+        >Export</button>
+        <button
+          class="selection-trash-action"
+          disabled={selectedSheets.length === 0 || !desktopAvailable() || !libraryPath || mutatingLibrary}
+          onclick={() => openBulkSheetAction("trash")}
+        >Trash</button>
+      </div>
+    {:else if !trashActive}
       <div class="library-search">
         <span aria-hidden="true">⌕</span>
         <input
           type="search"
-          placeholder={inboxActive ? "Search Inbox" : "Search every sheet"}
-          aria-label="Search library"
+          placeholder="Search Inbox and open projects"
+          aria-label="Search Inbox and open projects"
           value={searchQuery}
           oninput={(event) => handleSearchInput(event.currentTarget.value)}
         />
@@ -3290,7 +4058,7 @@ It passed the abandoned signal house before descending between black pines to th
       </div>
     {/if}
 
-    <div class:trash-view={trashActive} class="sheets">
+    <div class:trash-view={trashActive} class:selection-view={sheetSelectionMode} class="sheets">
       {#if trashActive}
         {#each filteredTrashItems as item}
           <article class="trash-card">
@@ -3308,18 +4076,66 @@ It passed the abandoned signal house before descending between black pines to th
         {#if filteredTrashItems.length === 0}
           <p class="empty-state">{trashOriginFilter === "all" ? "Trash is empty. Removed sheets will remain recoverable here." : "No removed sheets from this location."}</p>
         {/if}
+      {:else if searchQuery.trim()}
+        {#each searchResults as result}
+          <div
+            class:active={libraryPath === result.location.path && activeSheetPath === result.sheet.relativePath}
+            class="sheet-card-wrap global-result-wrap"
+          >
+            <button
+              class="sheet-card global-result-card"
+              onclick={() => void openGlobalSearchResult(result)}
+            >
+              <span class="global-result-heading">
+                <strong>{result.sheet.title}</strong>
+                <small>{result.location.name}</small>
+              </span>
+              <span class="excerpt">{result.sheet.excerpt}</span>
+              <span class="sheet-meta">{result.sheet.wordCount.toLocaleString()} words · {sheetFolder(result.sheet)}</span>
+            </button>
+          </div>
+        {/each}
+        {#if searchResults.length === 0 && !searching}
+          <p class="empty-state">No sheets in Inbox or an open project match this search.</p>
+        {/if}
+        {#if searchNotice}<p class="search-notice">{searchNotice}</p>{/if}
       {:else}
         {#each visibleSheets as sheet}
-          <div class:active={activeSheetPath === sheet.relativePath} class="sheet-card-wrap">
+          {@const favorite = favoriteSheetKeys.has(sheetReferenceKey(libraryPath ?? prototypeProjectPath, sheet.relativePath))}
+          <div
+            class:active={activeSheetPath === sheet.relativePath}
+            class:selected={selectedSheetPaths.has(sheet.relativePath)}
+            class:selection-mode={sheetSelectionMode}
+            class:has-sheet-actions={Boolean(libraryPath) && !sheetSelectionMode}
+            class="sheet-card-wrap"
+          >
             <button
               class="sheet-card"
-              onclick={() => void selectSheet(sheet)}
+              aria-pressed={sheetSelectionMode ? selectedSheetPaths.has(sheet.relativePath) : undefined}
+              onclick={() => sheetSelectionMode
+                ? toggleSheetSelection(sheet.relativePath)
+                : void selectSheet(sheet)}
             >
+              {#if sheetSelectionMode}
+                <span class="sheet-selection-check" aria-hidden="true">
+                  {selectedSheetPaths.has(sheet.relativePath) ? "✓" : ""}
+                </span>
+              {/if}
               <strong>{sheet.title}</strong>
               <span class="excerpt">{sheet.excerpt}</span>
               <span class="sheet-meta">{sheet.wordCount.toLocaleString()} words · {sheetFolder(sheet)}</span>
             </button>
-            {#if libraryPath}
+            {#if !sheetSelectionMode}
+              <button
+                class:active={favorite}
+                class="sheet-favorite-button"
+                aria-label={`${favorite ? "Remove" : "Add"} ${sheet.title} ${favorite ? "from" : "to"} Favorites`}
+                aria-pressed={favorite}
+                title={favorite ? "Remove from Favorites" : "Add to Favorites"}
+                onclick={() => toggleSheetFavorite(sheet)}
+              >{favorite ? "★" : "☆"}</button>
+            {/if}
+            {#if libraryPath && !sheetSelectionMode}
               <button
                 class="sheet-actions-button"
                 aria-label={`Actions for ${sheet.title}`}
@@ -3329,6 +4145,10 @@ It passed the abandoned signal house before descending between black pines to th
               >•••</button>
               {#if sheetActionsPath === sheet.relativePath}
                 <div class="sheet-actions-menu" role="menu">
+                  <button role="menuitem" onclick={() => toggleSheetFavorite(sheet)}>
+                    {favorite ? "Remove from Favorites" : "Add to Favorites"}
+                  </button>
+                  <div></div>
                   <button role="menuitem" onclick={() => openSheetDialog("rename", sheet)}>Rename</button>
                   <button role="menuitem" onclick={() => void duplicateSheet(sheet)}>Duplicate</button>
                   <button role="menuitem" onclick={() => openSheetDialog("move", sheet)}>{inboxActive ? "Move to project…" : "Move to folder or project…"}</button>
@@ -3340,7 +4160,7 @@ It passed the abandoned signal house before descending between black pines to th
           </div>
         {/each}
         {#if visibleSheets.length === 0}
-          <p class="empty-state">{searchQuery.trim() ? "No sheets match this search." : "No Markdown sheets in this group."}</p>
+          <p class="empty-state">No Markdown sheets in this group.</p>
         {/if}
       {/if}
     </div>
@@ -3416,6 +4236,13 @@ It passed the abandoned signal house before descending between black pines to th
                   aria-pressed={exportScope === "sheet"}
                   onclick={() => selectExportScope("sheet")}
                 >Sheet</button>
+                {#if selectedSheets.length > 0}
+                  <button
+                    class:active={exportScope === "selection"}
+                    aria-pressed={exportScope === "selection"}
+                    onclick={() => selectExportScope("selection")}
+                  >Selected</button>
+                {/if}
                 <button
                   class:active={exportScope === "folder"}
                   disabled={activeGroup === "All Sheets" || activeGroup === "Inbox"}
@@ -4130,6 +4957,67 @@ It passed the abandoned signal house before descending between black pines to th
     </footer>
   </section>
 
+  {#if quickSwitcherVisible}
+    <div class="modal-layer quick-switcher-layer" role="presentation">
+      <button
+        class="modal-backdrop"
+        aria-label="Close Quick Switcher"
+        onclick={closeQuickSwitcher}
+      ></button>
+      <div class="quick-switcher" role="dialog" aria-modal="true" aria-label="Quick Switcher">
+        <div class="quick-switcher-search">
+          <span aria-hidden="true">⌕</span>
+          <input
+            bind:this={quickSwitcherInput}
+            type="search"
+            placeholder="Find any sheet…"
+            aria-label="Find a sheet in Inbox or an open project"
+            aria-controls="quick-switcher-results"
+            aria-activedescendant={quickSwitcherResults.length > 0 ? `quick-result-${quickSwitcherIndex}` : undefined}
+            value={quickSwitcherQuery}
+            oninput={(event) => handleQuickSwitcherInput(event.currentTarget.value)}
+          />
+          {#if quickSwitcherSearching}<span class="quick-switcher-working" aria-label="Searching">•••</span>{/if}
+          <kbd>Esc</kbd>
+        </div>
+
+        <div id="quick-switcher-results" class="quick-switcher-results" role="listbox" aria-label="Sheets">
+          {#each quickSwitcherResults as result, index}
+            {@const favorite = favoriteSheetKeys.has(sheetReferenceKey(result.location.path, result.sheet.relativePath))}
+            <button
+              id={`quick-result-${index}`}
+              class:selected={index === quickSwitcherIndex}
+              role="option"
+              aria-selected={index === quickSwitcherIndex}
+              onmouseenter={() => (quickSwitcherIndex = index)}
+              onclick={() => void openGlobalSearchResult(result)}
+            >
+              <span>
+                <strong>
+                  {#if favorite}<span class="quick-favorite-marker" aria-hidden="true">★</span>{/if}
+                  {result.sheet.title}
+                </strong>
+                <small>{result.sheet.excerpt || "Recently opened"}</small>
+              </span>
+              <span class="quick-result-location">
+                <strong>{result.location.name}</strong>
+                <small>{result.sheet.relativePath}</small>
+              </span>
+            </button>
+          {/each}
+          {#if quickSwitcherResults.length === 0 && !quickSwitcherSearching}
+            <p>{quickSwitcherQuery.trim() ? "No matching sheets." : "No sheets are available in this location."}</p>
+          {/if}
+        </div>
+
+        <footer class="quick-switcher-footer">
+          <span>{quickSwitcherNotice || `${quickSwitcherResults.length} ${quickSwitcherResults.length === 1 ? "sheet" : "sheets"}`}</span>
+          <span><kbd>↑</kbd><kbd>↓</kbd> navigate <kbd>↵</kbd> open</span>
+        </footer>
+      </div>
+    </div>
+  {/if}
+
   {#if updateVisible}
     <div class="modal-layer" role="presentation">
       <button
@@ -4326,6 +5214,79 @@ It passed the abandoned signal house before descending between black pines to th
           >Cancel</button>
           <button class="sync-primary" type="submit" disabled={syncRunning}>
             {syncRunning ? "Initializing…" : "Confirm first sync"}
+          </button>
+        </div>
+      </form>
+    </div>
+  {/if}
+
+  {#if bulkSheetAction}
+    <div class="modal-layer" role="presentation">
+      <button
+        class="modal-backdrop"
+        aria-label="Close selected sheet action"
+        onclick={closeBulkSheetAction}
+      ></button>
+      <form
+        class="sheet-dialog bulk-sheet-dialog"
+        aria-label={`${bulkSheetAction} selected sheets`}
+        onsubmit={(event) => {
+          event.preventDefault();
+          void submitBulkSheetAction();
+        }}
+      >
+        <p class="eyebrow">{selectedSheets.length} selected</p>
+        <h2>{bulkSheetAction === "move" ? "Move selected sheets" : "Move selected sheets to Trash?"}</h2>
+
+        {#if bulkSheetAction === "move"}
+          <label for="bulk-sheet-project">Destination project</label>
+          <select
+            id="bulk-sheet-project"
+            value={dialogProjectPath}
+            oninput={(event) => void loadDialogProjectFolders(event.currentTarget.value)}
+          >
+            {#if !dialogProjectPath}<option value="">Open a project first…</option>{/if}
+            {#each sortedProjects.filter((project) => project.open) as project}
+              <option value={project.path}>{project.name}</option>
+            {/each}
+          </select>
+
+          <label for="bulk-sheet-group">Destination folder</label>
+          <input
+            id="bulk-sheet-group"
+            type="text"
+            maxlength="120"
+            list="bulk-known-groups"
+            required
+            value={dialogGroup}
+            oninput={(event) => (dialogGroup = event.currentTarget.value)}
+          />
+          <datalist id="bulk-known-groups">
+            {#each dialogFolders as folder}
+              <option value={folder.path}></option>
+            {/each}
+          </datalist>
+          <p class="dialog-note">Each Markdown file is moved atomically. If one file cannot be moved, completed files remain safe and the unprocessed selection stays selected.</p>
+        {:else}
+          <p class="trash-confirmation">
+            {selectedSheets.length} {selectedSheets.length === 1 ? "sheet" : "sheets"} will leave {inboxActive ? "Inbox" : "this project"}, but each can still be restored from universal Trash.
+          </p>
+        {/if}
+
+        {#if bulkActionError}<p class="dialog-error" role="alert">{bulkActionError}</p>{/if}
+
+        <div class="dialog-actions">
+          <button type="button" disabled={mutatingLibrary} onclick={closeBulkSheetAction}>Cancel</button>
+          <button
+            class:danger-primary={bulkSheetAction === "trash"}
+            type="submit"
+            disabled={mutatingLibrary || (bulkSheetAction === "move" && !dialogProjectPath)}
+          >
+            {mutatingLibrary
+              ? "Working…"
+              : bulkSheetAction === "move"
+                ? `Move ${selectedSheets.length}`
+                : `Move ${selectedSheets.length} to Trash`}
           </button>
         </div>
       </form>

@@ -30,8 +30,10 @@ jobs:
         with:
           workspaces: ./src-tauri -> target
       - run: pnpm install --frozen-lockfile
+      - name: Validate release metadata
+        run: scripts/release/verify.sh
       - run: pnpm build
       - run: cargo test --manifest-path src-tauri/Cargo.toml
       - name: Validate deployment scripts
         run: |
-          bash -n scripts/apt/*.sh scripts/pi/*.sh scripts/pi-image/*.sh deploy/pi-image/*.sh
+          bash -n scripts/apt/*.sh scripts/pi/*.sh scripts/pi-image/*.sh scripts/release/*.sh deploy/pi-image/*.sh

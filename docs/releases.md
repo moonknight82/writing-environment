@@ -12,7 +12,7 @@ The current macOS package uses ad-hoc Apple code signing for personal testing. T
 
 ## Publish
 
-1. Make sure `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json` contain the same version.
+1. Run `scripts/release/verify.sh` to confirm `package.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `src-tauri/tauri.conf.json`, and the release notes agree.
 2. Update `.github/release-notes.md` for the version being published.
 3. Run `pnpm install --frozen-lockfile`, `pnpm build`, and `cargo test --manifest-path src-tauri/Cargo.toml`.
 4. Commit the release changes.

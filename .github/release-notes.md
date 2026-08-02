@@ -1,23 +1,26 @@
-Adds a formatted Markdown Preview beside the fast source-writing mode. Preview
-renders common Markdown structure, including headings, emphasis, quotations,
-lists, code, and tables, and sanitizes rendered HTML before showing it.
+Version 0.6.0 makes larger Markdown libraries faster to navigate without adding
+proprietary metadata to manuscript folders.
 
-An empty Inbox now has an explicit, non-editable empty state with a **Create a
-sheet** action, so writing is never accidentally detached from a Markdown
-file. Switching back to Write preserves the original source and continues to
-use the operating system's spelling support.
+Search in the sheet column now spans Inbox and every open project, labels each
+result with its origin, and activates the correct library when opened. The new
+Command/Control+P Quick Switcher provides keyboard navigation through search
+results, recent sheets, and locally stored favorites.
 
-GitHub Releases now remain drafts while signed desktop artifacts, the updater
-manifest, and Raspberry Pi appliance packages are produced. They become public
-only once all required pieces are present, preventing an update check from
-seeing a release without `latest.json`.
+The sheet column also has an explicit selection mode. Writers can select sheets
+across folders in the active Inbox or project, then move them, send them to
+Trash, or export only that selection as DOCX, PDF, or EPUB. Batch file changes
+reuse the existing atomic single-sheet operations. If an item fails, completed
+work remains valid, unprocessed sheets stay selected, and the app reports exact
+partial progress.
 
-The signed APT repository continues to update the application and appliance
-shell together with Raspberry Pi OS through the Super+Space Updates action.
-Fresh flashable images include this fix.
+Recent and favorite references are local interface preferences only. They do
+not create or modify files inside Markdown projects.
 
-Signed desktop release for macOS Apple Silicon, Linux amd64, and Raspberry Pi
-ARM64.
+The release workflow now has a single source for release notes, avoiding stale
+text from an older release while signed platform artifacts are assembled. The
+release remains a private draft until macOS Apple Silicon, Linux amd64,
+Raspberry Pi ARM64, the updater manifest, and the signed Raspberry Pi APT
+repository are complete.
 
 This is a personal project under active development. Back up important writing
 and review the release notes before updating.

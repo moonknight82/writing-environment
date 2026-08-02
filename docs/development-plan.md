@@ -104,6 +104,16 @@ Current work:
 - [x] Keep GitHub releases private until the updater manifest and all signed platform artifacts exist.
 - [ ] Smoke-test Write/Preview switching, empty Inbox behavior, spelling, Writing Focus, and updater checks on macOS, Linux amd64, and the physical 2 GB Raspberry Pi.
 
+## v0.6 — Navigation and organization
+
+Current work:
+
+- [x] Search Inbox and every open project from the sheet list while preserving each result's origin.
+- [x] Add a keyboard-first Quick Switcher with Command/Control+P, arrow-key navigation, Enter to open, and Escape to close.
+- [x] Add recent and favorite sheets without writing metadata into Markdown project folders.
+- [x] Add explicit multi-selection for moving, trashing, and exporting sheets, with visible partial-progress reporting if a batch stops on an error.
+- [ ] Run the [v0.6 cross-platform test checklist](v0.6-test-checklist.md) on macOS, Linux amd64, and the physical 2 GB Raspberry Pi.
+
 ## Later work
 
 - plugin architecture and marketplace;

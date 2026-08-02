@@ -8,7 +8,7 @@ The application is portable across Raspberry Pi, Linux amd64, and macOS. Its ded
 
 ## Current milestone
 
-The v0.1 desktop vertical slice and dedicated Raspberry Pi appliance image are complete. Version 0.2 established large-library performance and reliability, v0.3 added signed application updates, v0.4 unified Inbox and project workflows, and v0.5 completes portable document export. The repository contains:
+The v0.1 desktop vertical slice and dedicated Raspberry Pi appliance image are complete. Version 0.2 established large-library performance and reliability, v0.3 added signed application updates, v0.4 unified Inbox and project workflows, v0.5 completed portable document export, and v0.6 makes navigation and multi-sheet organization practical across larger libraries. The repository contains:
 
 - three-pane library, sheet, and editor layout;
 - focus mode and independently collapsible sidebars;
@@ -18,10 +18,11 @@ The v0.1 desktop vertical slice and dedicated Raspberry Pi appliance image are c
 - native Markdown-folder selection;
 - explicit Write and formatted Markdown Preview modes, with sanitized rendering for headings, emphasis, lists, quotations, code, and tables;
 - recursive Markdown discovery and metadata extraction;
-- sheet creation, rename, duplication, and folder moves;
+- sheet creation, rename, duplication, folder moves, and explicit multi-selection for batch move, export, or Trash actions;
 - safe Inbox-to-project moves that atomically place and verify the destination before removing the source;
 - universal, origin-labelled Trash stored outside manuscripts, with original-location and Inbox-fallback restoration plus scoped Empty Trash confirmation;
 - full-text library search through a rebuildable, project-local SQLite FTS index, with direct Markdown scanning as a safe fallback;
+- global search across Inbox and every open project, plus a keyboard-first Quick Switcher with local recent and favorite sheets;
 - coalesced native project-folder notifications for Markdown changes made by sync tools, file managers, or other editors;
 - guarded autosave that detects concurrent disk changes and offers to keep both versions instead of overwriting either one;
 - optional reopening of the last project and sheet at launch;
@@ -69,6 +70,8 @@ Version 0.5.1 completes the export milestone with selected-folder and complete-p
 
 Version 0.5.5 adds a safe formatted Markdown preview and makes an empty Inbox explicitly non-editable until a sheet is created. It also prevents an incomplete GitHub Release from becoming the updater's latest release before its signed update manifest is available. Version 0.5.4 removes Raspberry Pi's incompatible Desktop/Taskbar appearance plugin from the panel-free appliance Control Centre. Version 0.5.3 made the writer visually fullscreen while allowing Raspberry Pi settings windows and dialogs to rise normally, and added a dedicated Display Settings launcher. The signed APT repository introduced in 0.5.2 updates the application, Fuzzel/Labwc shell, keyboard defaults, settings integration, and Plymouth theme alongside the normal Raspberry Pi OS packages.
 
+Version 0.6.0 adds global, origin-labelled search across Inbox and every open project; a keyboard-first Quick Switcher with local recent and favorite sheets; and an explicit multi-selection mode for moving, trashing, or exporting several sheets. These navigation preferences remain local interface state and never add metadata to Markdown folders. Batch file mutations retain the existing per-file atomic safety rules and report partial progress if an item prevents the batch from continuing.
+
 Update artifacts and `latest.json` are published through [GitHub Releases](https://github.com/moonknight82/writing-environment/releases). Every application update is verified with Tauri's embedded public signing key before installation. The private key is held only in the repository's GitHub Actions secrets. macOS uses a signed Tauri application archive; Linux amd64 and Raspberry Pi use signed Debian packages and request system authorization when installation begins.
 
 The in-app updater remains application-only on desktop systems. On the Raspberry Pi appliance, the recommended Super+Space **Updates** action uses the signed APT repositories and can update both Raspberry Pi OS and the appliance packages. Neither path modifies projects, History, Trash, rclone credentials, or application preferences.
@@ -81,7 +84,7 @@ Remote credentials are not stored by Writing Environment. Configure a provider o
 
 History keeps the newest 30 pre-save versions for each sheet outside the synchronized project. Restoring a revision snapshots the current sheet first, so a restore can itself be undone.
 
-The editor toolbar's **Export** menu writes the current in-memory sheet, a selected folder, or the complete active project as DOCX, PDF, or EPUB without changing its Markdown source. Multi-sheet exports can be ordered alphabetically or by creation date, add a title page and author byline, and begin each sheet on a new page or EPUB chapter. Title, author, language, scope, ordering, and layout choices can be saved as reusable presets. DOCX and PDF use a Letter manuscript profile with one-inch margins, 12 pt double-spaced body paragraphs, half-inch first-line indents, and dedicated treatments for titles, headings, quotations, lists, code, and scene breaks. EPUB uses the same parsed structure in reflowable XHTML with local CSS, metadata, and navigation. YAML front matter is omitted, and a leading `#` heading that matches the sheet title is not duplicated. Export writes through a temporary file and atomically replaces the chosen destination. Image embedding and Markdown tables remain outside this release.
+The editor toolbar's **Export** menu writes the current in-memory sheet, an explicit sheet selection, a selected folder, or the complete active project as DOCX, PDF, or EPUB without changing its Markdown source. Multi-sheet exports can be ordered alphabetically or by creation date, add a title page and author byline, and begin each sheet on a new page or EPUB chapter. Title, author, language, scope, ordering, and layout choices can be saved as reusable presets. DOCX and PDF use a Letter manuscript profile with one-inch margins, 12 pt double-spaced body paragraphs, half-inch first-line indents, and dedicated treatments for titles, headings, quotations, lists, code, and scene breaks. EPUB uses the same parsed structure in reflowable XHTML with local CSS, metadata, and navigation. YAML front matter is omitted, and a leading `#` heading that matches the sheet title is not duplicated. Export writes through a temporary file and atomically replaces the chosen destination. Image embedding and Markdown tables remain outside this release.
 
 PDF export embeds [Source Serif 4](https://github.com/adobe-fonts/source-serif), distributed under the SIL Open Font License 1.1. The bundled license is kept in `src-tauri/assets/fonts/LICENSE.md`.
 
