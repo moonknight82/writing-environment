@@ -106,6 +106,13 @@
   type SheetSort = "created-desc" | "created-asc" | "title-asc" | "title-desc";
   type ExportScope = "sheet" | "selection" | "folder" | "project";
   type BulkSheetAction = "move" | "trash";
+  type TransientPopoverKind = "export" | "sync" | "goal" | "focus" | "writer" | "theme" | "sort" | "project" | "sheet";
+
+  interface TransientPopoverState {
+    kind: TransientPopoverKind;
+    key: string | null;
+    trigger: HTMLElement | null;
+  }
 
   type SheetDialogMode = "create" | "rename" | "move" | "trash";
 
@@ -253,6 +260,7 @@ It passed the abandoned signal house before descending between black pines to th
   let activeThemeId = "paper";
   let libraryVisible = true;
   let sheetsVisible = true;
+  let transientPopover: TransientPopoverState | null = null;
   let themeMenuVisible = false;
   let syncMenuVisible = false;
   let writerMenuVisible = false;
@@ -410,7 +418,7 @@ It passed the abandoned signal house before descending between black pines to th
   let externalConflictPath: string | null = null;
   let externalDiskContent: string | null = null;
   let resolvingExternalConflict = false;
-  let appVersion = "0.5.5";
+  let appVersion = "0.7.0";
   let automaticUpdateChecks = true;
   let updateVisible = false;
   let updateChecking = false;
@@ -420,6 +428,16 @@ It passed the abandoned signal house before descending between black pines to th
   let updateDownloaded = 0;
   let updateTotal = 0;
   let updateCheckTimer: ReturnType<typeof setTimeout> | undefined;
+
+  $: exportMenuVisible = transientPopover?.kind === "export";
+  $: syncMenuVisible = transientPopover?.kind === "sync";
+  $: goalMenuVisible = transientPopover?.kind === "goal";
+  $: focusMenuVisible = transientPopover?.kind === "focus";
+  $: writerMenuVisible = transientPopover?.kind === "writer";
+  $: themeMenuVisible = transientPopover?.kind === "theme";
+  $: sortMenuVisible = transientPopover?.kind === "sort";
+  $: projectMenuPath = transientPopover?.kind === "project" ? transientPopover.key : null;
+  $: sheetActionsPath = transientPopover?.kind === "sheet" ? transientPopover.key : null;
 
   $: visibleSheets = sortSheets(
     activeGroup === "All Sheets" || inboxActive
@@ -607,7 +625,7 @@ It passed the abandoned signal house before descending between black pines to th
 
   async function checkForAppUpdate(showWhenCurrent = true): Promise<void> {
     if (updateChecking || updateInstalling) return;
-    writerMenuVisible = false;
+    if (writerMenuVisible) closeTransientPopover();
 
     if (!desktopAvailable()) {
       updateVisible = true;
@@ -929,13 +947,92 @@ It passed the abandoned signal house before descending between black pines to th
     closeToolbarMenus();
   }
 
+  function transientPopoverIs(kind: TransientPopoverKind, key: string | null = null): boolean {
+    return transientPopover?.kind === kind && transientPopover.key === key;
+  }
+
+  function transientPopoverId(kind: TransientPopoverKind, key: string | null = null): string {
+    return key === null ? kind : `${kind}:${key}`;
+  }
+
+  function transientMenuDomId(kind: TransientPopoverKind, key: string | null = null): string {
+    const suffix = key === null ? kind : `${kind}-${key}`;
+    return `transient-menu-${suffix.replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
+  }
+
+  function activeTransientMenu(): HTMLElement | null {
+    if (!transientPopover) return null;
+    const popoverId = transientPopoverId(transientPopover.kind, transientPopover.key);
+    const surface = Array.from(document.querySelectorAll<HTMLElement>("[data-transient-popover]"))
+      .find((candidate) => candidate.dataset.transientPopover === popoverId);
+    return surface?.querySelector<HTMLElement>('[role="menu"]') ?? null;
+  }
+
+  function transientMenuItems(menu: HTMLElement): HTMLElement[] {
+    return Array.from(menu.querySelectorAll<HTMLElement>(
+      '[role="menuitem"]:not([disabled]), [role="menuitemradio"]:not([disabled]), [role="menuitemcheckbox"]:not([disabled])',
+    ));
+  }
+
+  function focusTransientMenu(preferSelected = true): void {
+    requestAnimationFrame(() => {
+      const menu = activeTransientMenu();
+      if (!menu) return;
+      const items = transientMenuItems(menu);
+      const selected = preferSelected
+        ? items.find((item) => item.getAttribute("aria-checked") === "true" || item.classList.contains("active"))
+        : null;
+      (selected ?? items[0])?.focus();
+    });
+  }
+
+  function moveTransientMenuFocus(menu: HTMLElement, direction: 1 | -1): void {
+    const items = transientMenuItems(menu);
+    if (items.length === 0) return;
+    const currentIndex = items.findIndex((item) => item === document.activeElement);
+    const nextIndex = currentIndex < 0
+      ? direction === 1 ? 0 : items.length - 1
+      : (currentIndex + direction + items.length) % items.length;
+    items[nextIndex].focus();
+  }
+
+  function openTransientPopover(
+    kind: TransientPopoverKind,
+    trigger: HTMLElement | null,
+    key: string | null = null,
+  ): void {
+    if (transientPopover?.kind === "export" && kind !== "export") {
+      exportPresetEditorVisible = false;
+    }
+    transientPopover = { kind, key, trigger };
+    focusTransientMenu();
+  }
+
+  function closeTransientPopover(restoreFocus = false): void {
+    const closing = transientPopover;
+    if (!closing) return;
+    transientPopover = null;
+    if (closing.kind === "export") exportPresetEditorVisible = false;
+    if (restoreFocus && closing.trigger?.isConnected) {
+      requestAnimationFrame(() => closing.trigger?.focus());
+    }
+  }
+
+  function toggleTransientPopover(
+    event: MouseEvent,
+    kind: TransientPopoverKind,
+    key: string | null = null,
+  ): void {
+    if (transientPopoverIs(kind, key)) {
+      closeTransientPopover();
+      return;
+    }
+    const trigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+    openTransientPopover(kind, trigger, key);
+  }
+
   function closeToolbarMenus(): void {
-    exportMenuVisible = false;
-    themeMenuVisible = false;
-    syncMenuVisible = false;
-    writerMenuVisible = false;
-    focusMenuVisible = false;
-    goalMenuVisible = false;
+    closeTransientPopover();
   }
 
   function handleWindowKeydown(event: KeyboardEvent): void {
@@ -957,6 +1054,39 @@ It passed the abandoned signal house before descending between black pines to th
           void openGlobalSearchResult(result);
         }
         return;
+      }
+    }
+
+    if (event.key === "Escape" && transientPopover) {
+      event.preventDefault();
+      closeTransientPopover(true);
+      return;
+    }
+
+    const transientMenu = activeTransientMenu();
+    if (transientMenu) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        moveTransientMenuFocus(transientMenu, event.key === "ArrowDown" ? 1 : -1);
+        return;
+      }
+      if (event.key === "Home" || event.key === "End") {
+        event.preventDefault();
+        const items = transientMenuItems(transientMenu);
+        (event.key === "Home" ? items[0] : items[items.length - 1])?.focus();
+        return;
+      }
+      if (
+        (event.key === "Enter" || event.key === " ")
+        && event.target instanceof HTMLElement
+        && transientMenuItems(transientMenu).includes(event.target)
+      ) {
+        event.preventDefault();
+        event.target.click();
+        return;
+      }
+      if (event.key === "Tab") {
+        closeTransientPopover();
       }
     }
 
@@ -1003,10 +1133,16 @@ It passed the abandoned signal house before descending between black pines to th
   }
 
   function handleWindowClick(event: MouseEvent): void {
-    if (!projectMenuPath) return;
+    if (!transientPopover) return;
     const target = event.target;
-    if (target instanceof Element && target.closest(".project-row")) return;
-    projectMenuPath = null;
+    const surface = target instanceof Element
+      ? target.closest<HTMLElement>("[data-transient-popover]")
+      : null;
+    if (
+      surface?.dataset.transientPopover
+      === transientPopoverId(transientPopover.kind, transientPopover.key)
+    ) return;
+    closeTransientPopover();
   }
 
   function openQuickSwitcher(): void {
@@ -1056,7 +1192,7 @@ It passed the abandoned signal house before descending between black pines to th
     activeThemeId = selected.id;
     applyTheme(selected);
     localStorage.setItem("writing-environment.theme", selected.id);
-    themeMenuVisible = false;
+    closeTransientPopover();
   }
 
   function setLineHeight(value: number): void {
@@ -1122,7 +1258,7 @@ It passed the abandoned signal house before descending between black pines to th
   function setWritingFocusMode(mode: WritingFocusMode): void {
     writingFocusMode = mode;
     localStorage.setItem("writing-environment.writing-focus", mode);
-    focusMenuVisible = false;
+    closeTransientPopover();
     scheduleFocusOverlayGeometryRefresh();
   }
 
@@ -1150,7 +1286,7 @@ It passed the abandoned signal house before descending between black pines to th
 
   function applySessionGoal(): void {
     setSessionGoal(sessionGoalDraft);
-    goalMenuVisible = false;
+    closeTransientPopover();
   }
 
   function resetSessionProgress(): void {
@@ -1425,7 +1561,7 @@ It passed the abandoned signal house before descending between black pines to th
   }
 
   async function openProject(project: ProjectBookmark): Promise<void> {
-    projectMenuPath = null;
+    closeTransientPopover();
     if (!desktopMode && project.path === prototypeProjectPath) return;
     if (!desktopAvailable()) {
       errorMessage = "Pinned projects open in the Tauri desktop build.";
@@ -1456,9 +1592,21 @@ It passed the abandoned signal house before descending between black pines to th
 
   function openProjectMenu(event: MouseEvent, project: ProjectBookmark): void {
     event.preventDefault();
-    projectMenuPath = project.path;
+    const row = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+    const trigger = row?.querySelector<HTMLElement>(".project-open") ?? row;
+    openTransientPopover("project", trigger, project.path);
     projectMenuX = Math.max(8, Math.min(event.clientX, window.innerWidth - 166));
     projectMenuY = Math.max(8, Math.min(event.clientY, window.innerHeight - 128));
+  }
+
+  function openProjectKeyboardMenu(event: KeyboardEvent, project: ProjectBookmark): void {
+    if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+    event.preventDefault();
+    const trigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+    const bounds = trigger?.getBoundingClientRect();
+    openTransientPopover("project", trigger, project.path);
+    projectMenuX = Math.max(8, Math.min(bounds?.left ?? 8, window.innerWidth - 166));
+    projectMenuY = Math.max(8, Math.min(bounds?.bottom ?? 8, window.innerHeight - 128));
   }
 
   function selectFolder(folder: string): void {
@@ -1466,15 +1614,14 @@ It passed the abandoned signal house before descending between black pines to th
     activeGroup = folder;
     searchQuery = "";
     searchResults = [];
-    sortMenuVisible = false;
+    closeTransientPopover();
   }
 
   function enterSheetSelection(): void {
     if (trashActive || searchQuery.trim() || visibleSheets.length === 0) return;
     sheetSelectionMode = true;
     selectedSheetPaths = new Set();
-    sheetActionsPath = null;
-    sortMenuVisible = false;
+    closeTransientPopover();
   }
 
   function exitSheetSelection(): void {
@@ -1531,18 +1678,14 @@ It passed the abandoned signal house before descending between black pines to th
     bulkActionError = "";
   }
 
-  function openSelectedSheetExport(): void {
+  function openSelectedSheetExport(event: MouseEvent): void {
     if (!desktopAvailable() || !libraryPath || selectedSheets.length === 0) return;
     exportScope = "selection";
     exportTitlePage = true;
     exportTitle = "";
     selectedExportPresetId = "";
-    exportMenuVisible = true;
-    syncMenuVisible = false;
-    goalMenuVisible = false;
-    focusMenuVisible = false;
-    writerMenuVisible = false;
-    themeMenuVisible = false;
+    const trigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+    openTransientPopover("export", trigger);
   }
 
   async function selectUniversalTrash(): Promise<void> {
@@ -1552,8 +1695,7 @@ It passed the abandoned signal house before descending between black pines to th
     searchQuery = "";
     searchResults = [];
     exitSheetSelection();
-    sheetActionsPath = null;
-    sortMenuVisible = false;
+    closeTransientPopover();
     try {
       await refreshUniversalTrash();
       errorMessage = "";
@@ -1576,7 +1718,7 @@ It passed the abandoned signal house before descending between black pines to th
       candidate.path === project.path ? { ...candidate, open: false } : candidate,
     );
     saveProjects();
-    projectMenuPath = null;
+    closeTransientPopover();
     if (!isActive) return;
 
     if (syncTimer) clearTimeout(syncTimer);
@@ -1709,7 +1851,7 @@ It passed the abandoned signal house before descending between black pines to th
     resetSheetSelectionState();
     if (syncTimer) clearTimeout(syncTimer);
     syncTimer = undefined;
-    syncMenuVisible = false;
+    closeTransientPopover();
     inboxActive = true;
     trashActive = false;
     inboxPath = selected.path;
@@ -1773,14 +1915,10 @@ It passed the abandoned signal house before descending between black pines to th
     }
   }
 
-  function openSyncMenu(): void {
-    syncMenuVisible = !syncMenuVisible;
-    exportMenuVisible = false;
-    goalMenuVisible = false;
-    focusMenuVisible = false;
-    writerMenuVisible = false;
-    themeMenuVisible = false;
-    if (syncMenuVisible) void refreshSyncAvailability();
+  function openSyncMenu(event: MouseEvent): void {
+    const opening = !syncMenuVisible;
+    toggleTransientPopover(event, "sync");
+    if (opening) void refreshSyncAvailability();
   }
 
   function saveUniversalSyncRoot(): void {
@@ -2316,12 +2454,7 @@ It passed the abandoned signal house before descending between black pines to th
     historyVisible = true;
     historyMessage = "";
     restoreConfirmId = null;
-    exportMenuVisible = false;
-    goalMenuVisible = false;
-    focusMenuVisible = false;
-    writerMenuVisible = false;
-    themeMenuVisible = false;
-    syncMenuVisible = false;
+    closeTransientPopover();
 
     if (!libraryPath || !activeSheetPath || !desktopAvailable()) {
       historyMessage = "History becomes available after opening a sheet in the desktop app.";
@@ -2532,7 +2665,7 @@ It passed the abandoned signal house before descending between black pines to th
       if (!destination) return;
       errorMessage = "";
       saveStatus = `Exported ${format.toUpperCase()}`;
-      exportMenuVisible = false;
+      closeTransientPopover();
     } catch (error) {
       errorMessage = `Cannot export this document: ${errorText(error)}`;
     } finally {
@@ -2989,7 +3122,7 @@ It passed the abandoned signal house before descending between black pines to th
       favoriteSheets = [storedSheetReference(location, sheet), ...favoriteSheets];
     }
     saveSheetReferences();
-    sheetActionsPath = null;
+    closeTransientPopover();
   }
 
   function removeSheetReferences(root: string, relativePath: string): void {
@@ -3160,7 +3293,7 @@ It passed the abandoned signal house before descending between black pines to th
       errorMessage = "Sheet management is available after opening a project in the desktop app.";
       return;
     }
-    sheetActionsPath = null;
+    closeTransientPopover();
     sheetDialogMode = mode;
     dialogSheet = sheet;
     dialogTitle = mode === "rename" ? sheet?.title ?? "" : "";
@@ -3386,7 +3519,7 @@ It passed the abandoned signal house before descending between black pines to th
 
   async function duplicateSheet(sheet: SheetSummary): Promise<void> {
     if (!libraryPath) return;
-    sheetActionsPath = null;
+    closeTransientPopover();
     mutatingLibrary = true;
     try {
       if (dirty && !(await persistCurrentSheet())) {
@@ -3601,7 +3734,7 @@ It passed the abandoned signal house before descending between black pines to th
 
   function setSheetSort(value: SheetSort): void {
     sheetSort = value;
-    sortMenuVisible = false;
+    closeTransientPopover();
     localStorage.setItem("writing-environment.sheet-sort", value);
   }
 
@@ -3838,6 +3971,7 @@ It passed the abandoned signal house before descending between black pines to th
               <div
                 class:active={activeProjectPath === project.path}
                 class="project-row"
+                data-transient-popover={transientPopoverId("project", project.path)}
                 role="group"
                 oncontextmenu={(event) => {
                   if (desktopMode) openProjectMenu(event, project);
@@ -3846,7 +3980,11 @@ It passed the abandoned signal house before descending between black pines to th
                 <button
                   class="project-open"
                   title={project.path}
+                  aria-haspopup="menu"
+                  aria-expanded={projectMenuPath === project.path}
+                  aria-controls={projectMenuPath === project.path ? transientMenuDomId("project", project.path) : undefined}
                   onclick={() => void openProject(project)}
+                  onkeydown={(event) => openProjectKeyboardMenu(event, project)}
                 >
                   <span aria-hidden="true">{activeProjectPath === project.path ? "▾" : project.open ? "▱" : "◇"}</span>
                   <span>{project.name}</span>
@@ -3859,11 +3997,12 @@ It passed the abandoned signal house before descending between black pines to th
                   title={project.pinned ? "Unpin project" : "Pin project"}
                   onclick={() => {
                     toggleProjectPin(project.path);
-                    projectMenuPath = null;
+                    closeTransientPopover();
                   }}
                 >{project.pinned ? "★" : "☆"}</button>
                 {#if projectMenuPath === project.path}
                   <div
+                    id={transientMenuDomId("project", project.path)}
                     class="project-context-menu"
                     role="menu"
                     aria-label={`Actions for ${project.name}`}
@@ -3876,7 +4015,7 @@ It passed the abandoned signal house before descending between black pines to th
                       role="menuitem"
                       onclick={() => {
                         toggleProjectPin(project.path);
-                        projectMenuPath = null;
+                        closeTransientPopover();
                       }}
                     >{project.pinned ? "Remove from Favorites" : "Add to Favorites"}</button>
                     {#if project.open}
@@ -3980,18 +4119,19 @@ It passed the abandoned signal house before descending between black pines to th
             title="Select multiple sheets"
             onclick={enterSheetSelection}
           >Select</button>
-          <div class="sheet-sort-control">
+          <div class="sheet-sort-control" data-transient-popover={transientPopoverId("sort")}>
             <button
               class:active={sortMenuVisible}
               class="icon-button sheet-sort-button"
               aria-label={`Sort sheets: ${sheetSortLabel(sheetSort)}`}
               aria-haspopup="menu"
               aria-expanded={sortMenuVisible}
+              aria-controls={sortMenuVisible ? transientMenuDomId("sort") : undefined}
               title={`Sort sheets: ${sheetSortLabel(sheetSort)}`}
-              onclick={() => (sortMenuVisible = !sortMenuVisible)}
+              onclick={(event) => toggleTransientPopover(event, "sort")}
             >⇅</button>
             {#if sortMenuVisible}
-              <div class="sheet-sort-menu" role="menu" aria-label="Sort sheets">
+              <div id={transientMenuDomId("sort")} class="sheet-sort-menu" role="menu" aria-label="Sort sheets">
                 <p class="eyebrow">Sort sheets</p>
                 {#each [
                   { id: "created-desc", label: "Newest first", symbol: "↓" },
@@ -4035,6 +4175,7 @@ It passed the abandoned signal house before descending between black pines to th
           onclick={() => openBulkSheetAction("move")}
         >Move</button>
         <button
+          data-transient-popover={transientPopoverId("export")}
           disabled={selectedSheets.length === 0 || !desktopAvailable() || !libraryPath || exportRunning}
           onclick={openSelectedSheetExport}
         >Export</button>
@@ -4108,6 +4249,7 @@ It passed the abandoned signal house before descending between black pines to th
             class:selection-mode={sheetSelectionMode}
             class:has-sheet-actions={Boolean(libraryPath) && !sheetSelectionMode}
             class="sheet-card-wrap"
+            data-transient-popover={transientPopoverId("sheet", sheet.relativePath)}
           >
             <button
               class="sheet-card"
@@ -4141,10 +4283,11 @@ It passed the abandoned signal house before descending between black pines to th
                 aria-label={`Actions for ${sheet.title}`}
                 aria-haspopup="menu"
                 aria-expanded={sheetActionsPath === sheet.relativePath}
-                onclick={() => (sheetActionsPath = sheetActionsPath === sheet.relativePath ? null : sheet.relativePath)}
+                aria-controls={sheetActionsPath === sheet.relativePath ? transientMenuDomId("sheet", sheet.relativePath) : undefined}
+                onclick={(event) => toggleTransientPopover(event, "sheet", sheet.relativePath)}
               >•••</button>
               {#if sheetActionsPath === sheet.relativePath}
-                <div class="sheet-actions-menu" role="menu">
+                <div id={transientMenuDomId("sheet", sheet.relativePath)} class="sheet-actions-menu" role="menu" aria-label={`Actions for ${sheet.title}`}>
                   <button role="menuitem" onclick={() => toggleSheetFavorite(sheet)}>
                     {favorite ? "Remove from Favorites" : "Add to Favorites"}
                   </button>
@@ -4206,7 +4349,7 @@ It passed the abandoned signal house before descending between black pines to th
       <div class="document-title">{activeSheet}</div>
 
       <div class="toolbar-group toolbar-end">
-        <div class="export-control">
+        <div class="export-control" data-transient-popover={transientPopoverId("export")}>
           <button
             class:active={exportMenuVisible}
             class="export-button"
@@ -4215,14 +4358,7 @@ It passed the abandoned signal house before descending between black pines to th
             aria-haspopup="menu"
             aria-expanded={exportMenuVisible}
             title="Export document"
-            onclick={() => {
-              exportMenuVisible = !exportMenuVisible;
-              syncMenuVisible = false;
-              goalMenuVisible = false;
-              focusMenuVisible = false;
-              writerMenuVisible = false;
-              themeMenuVisible = false;
-            }}
+            onclick={(event) => toggleTransientPopover(event, "export")}
           >
             <span class="export-symbol" aria-hidden="true">⇩</span>
             <span>{exportRunning ? "Exporting…" : "Export"}</span>
@@ -4402,7 +4538,7 @@ It passed the abandoned signal house before descending between black pines to th
           <span>History</span>
         </button>
 
-        <div class="sync-control">
+        <div class="sync-control" data-transient-popover={transientPopoverId("sync")}>
           <button
             class:active={syncMenuVisible || syncPhase === "syncing" || syncPhase === "conflict"}
             class:error={syncPhase === "error"}
@@ -4543,7 +4679,7 @@ It passed the abandoned signal house before descending between black pines to th
           {/if}
         </div>
 
-        <div class="session-goal-control">
+        <div class="session-goal-control" data-transient-popover={transientPopoverId("goal")}>
           <button
             class:active={goalMenuVisible || (sessionGoal > 0 && sessionWords >= sessionGoal)}
             class="session-goal-button"
@@ -4551,14 +4687,9 @@ It passed the abandoned signal house before descending between black pines to th
             aria-haspopup="dialog"
             aria-expanded={goalMenuVisible}
             title="Session word goal"
-            onclick={() => {
-              goalMenuVisible = !goalMenuVisible;
+            onclick={(event) => {
               sessionGoalDraft = sessionGoal;
-              exportMenuVisible = false;
-              focusMenuVisible = false;
-              writerMenuVisible = false;
-              themeMenuVisible = false;
-              syncMenuVisible = false;
+              toggleTransientPopover(event, "goal");
             }}
           >
             <span class="goal-symbol" aria-hidden="true">◔</span>
@@ -4603,7 +4734,7 @@ It passed the abandoned signal house before descending between black pines to th
           {/if}
         </div>
 
-        <div class="writing-focus-control">
+        <div class="writing-focus-control" data-transient-popover={transientPopoverId("focus")}>
           <button
             class:active={writingFocusMode !== "off" || focusMenuVisible}
             class="writing-focus-button"
@@ -4611,15 +4742,9 @@ It passed the abandoned signal house before descending between black pines to th
             aria-label={`Writing focus: ${writingFocusMode}`}
             aria-haspopup="menu"
             aria-expanded={focusMenuVisible}
+            aria-controls={focusMenuVisible ? transientMenuDomId("focus") : undefined}
             title={editorMode === "preview" ? "Writing focus is available in Write mode" : `Writing focus: ${writingFocusMode}`}
-            onclick={() => {
-              focusMenuVisible = !focusMenuVisible;
-              exportMenuVisible = false;
-              goalMenuVisible = false;
-              writerMenuVisible = false;
-              themeMenuVisible = false;
-              syncMenuVisible = false;
-            }}
+            onclick={(event) => toggleTransientPopover(event, "focus")}
           >
             <span class="focus-symbol" aria-hidden="true">◎</span>
             <span>Focus</span>
@@ -4627,7 +4752,7 @@ It passed the abandoned signal house before descending between black pines to th
           </button>
 
           {#if focusMenuVisible}
-            <div class="writing-focus-menu" role="menu" aria-label="Writing focus">
+            <div id={transientMenuDomId("focus")} class="writing-focus-menu" role="menu" aria-label="Writing focus">
               <p class="eyebrow">Writing focus</p>
               {#each [
                 { id: "off", name: "Off", description: "Show the full manuscript normally." },
@@ -4653,7 +4778,7 @@ It passed the abandoned signal house before descending between black pines to th
           {/if}
         </div>
 
-        <div class="writer-control">
+        <div class="writer-control" data-transient-popover={transientPopoverId("writer")}>
           <button
             class:active={writerMenuVisible}
             class="icon-button writer-button"
@@ -4661,14 +4786,7 @@ It passed the abandoned signal house before descending between black pines to th
             aria-haspopup="dialog"
             aria-expanded={writerMenuVisible}
             title="Writer appearance"
-            onclick={() => {
-              writerMenuVisible = !writerMenuVisible;
-              exportMenuVisible = false;
-              goalMenuVisible = false;
-              themeMenuVisible = false;
-              focusMenuVisible = false;
-              syncMenuVisible = false;
-            }}
+            onclick={(event) => toggleTransientPopover(event, "writer")}
           >Aa</button>
 
           {#if writerMenuVisible}
@@ -4793,26 +4911,20 @@ It passed the abandoned signal house before descending between black pines to th
           {/if}
         </div>
 
-        <div class="theme-control">
+        <div class="theme-control" data-transient-popover={transientPopoverId("theme")}>
           <button
             class="theme-button"
             aria-haspopup="menu"
             aria-expanded={themeMenuVisible}
-            onclick={() => {
-              themeMenuVisible = !themeMenuVisible;
-              exportMenuVisible = false;
-              goalMenuVisible = false;
-              writerMenuVisible = false;
-              focusMenuVisible = false;
-              syncMenuVisible = false;
-            }}
+            aria-controls={themeMenuVisible ? transientMenuDomId("theme") : undefined}
+            onclick={(event) => toggleTransientPopover(event, "theme")}
           >
             <span class="theme-swatch"></span>
             {themes.find((theme) => theme.id === activeThemeId)?.name}
           </button>
 
           {#if themeMenuVisible}
-            <div class="theme-menu" role="menu">
+            <div id={transientMenuDomId("theme")} class="theme-menu" role="menu" aria-label="Visual theme">
               <p class="eyebrow">Visual theme</p>
               {#each themes as theme}
                 <button
@@ -4841,11 +4953,7 @@ It passed the abandoned signal house before descending between black pines to th
           aria-label="Toggle distraction-free layout"
           title="Distraction-free layout"
           onclick={() => {
-            goalMenuVisible = false;
-            focusMenuVisible = false;
-            writerMenuVisible = false;
-            themeMenuVisible = false;
-            syncMenuVisible = false;
+            closeTransientPopover();
             const entering = libraryVisible || sheetsVisible;
             libraryVisible = !entering;
             sheetsVisible = !entering;

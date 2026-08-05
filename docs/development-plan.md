@@ -114,6 +114,17 @@ Current work:
 - [x] Add explicit multi-selection for moving, trashing, and exporting sheets, with visible partial-progress reporting if a batch stops on an error.
 - [ ] Run the [v0.6 cross-platform test checklist](v0.6-test-checklist.md) on macOS, Linux amd64, and the physical 2 GB Raspberry Pi.
 
+## v0.7 — Interaction polish and accessibility
+
+Planned:
+
+- [x] Replace independent menu visibility toggles with one transient-popover controller for toolbar, sort, project, and sheet-action menus.
+- [x] Close an open popover when the writer clicks outside it, while preserving clicks and text entry inside the popover.
+- [x] Close popovers with Escape, return focus to the button that opened them, and prevent more than one transient popover from remaining open.
+- [x] Add consistent keyboard navigation and accessible focus treatment for menu items without changing modal-dialog behavior.
+- [ ] Keep popovers within the visible window at the Raspberry Pi's minimum supported display size.
+- [ ] Smoke-test the interaction model with mouse and keyboard on macOS, Linux amd64, and the physical Raspberry Pi.
+
 ## Later work
 
 - plugin architecture and marketplace;

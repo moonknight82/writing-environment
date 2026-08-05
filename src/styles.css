@@ -38,6 +38,16 @@ button:focus-visible {
   outline-offset: -2px;
 }
 
+:where([role="menu"]) :is(
+  [role="menuitem"],
+  [role="menuitemradio"],
+  [role="menuitemcheckbox"]
+):focus-visible {
+  outline-width: 1px;
+  outline-offset: -1px;
+  background: var(--accent-soft);
+}
+
 main {
   display: grid;
   grid-template-columns: 224px 304px minmax(0, 1fr);
