@@ -25,6 +25,45 @@ fn appliance_mode_enabled() -> bool {
         .unwrap_or(false)
 }
 
+#[cfg(any(target_os = "linux", test))]
+fn linux_has_nvidia_drm_device(drm_root: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(drm_root) else {
+        return false;
+    };
+
+    entries.flatten().any(|entry| {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let Some(card_number) = name.strip_prefix("card") else {
+            return false;
+        };
+
+        if card_number.is_empty()
+            || !card_number
+                .chars()
+                .all(|character| character.is_ascii_digit())
+        {
+            return false;
+        }
+
+        fs::read_to_string(entry.path().join("device/vendor"))
+            .map(|vendor| vendor.trim().eq_ignore_ascii_case("0x10de"))
+            .unwrap_or(false)
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn configure_linux_webkit_renderer() {
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none()
+        && linux_has_nvidia_drm_device(Path::new("/sys/class/drm"))
+    {
+        // WebKitGTK's DMA-BUF renderer can fail to allocate GBM buffers on
+        // NVIDIA systems even though the desktop itself is already running.
+        // Select WebKit's shared-memory path before the webview is created.
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn enable_native_spell_and_grammar_checking() {
     use objc2_foundation::{ns_string, NSUserDefaults};
@@ -2106,6 +2145,9 @@ fn path_for_frontend(path: &Path) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    configure_linux_webkit_renderer();
+
     #[cfg(target_os = "macos")]
     enable_native_spell_and_grammar_checking();
 
@@ -2171,6 +2213,26 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nvidia_drm_device_enables_renderer_fallback() {
+        let root = tempfile::tempdir().expect("temporary DRM root");
+        let device = root.path().join("card0/device");
+        fs::create_dir_all(&device).expect("DRM device directory");
+        fs::write(device.join("vendor"), "0x10de\n").expect("vendor id");
+
+        assert!(linux_has_nvidia_drm_device(root.path()));
+    }
+
+    #[test]
+    fn non_nvidia_drm_device_keeps_default_renderer() {
+        let root = tempfile::tempdir().expect("temporary DRM root");
+        let device = root.path().join("card0/device");
+        fs::create_dir_all(&device).expect("DRM device directory");
+        fs::write(device.join("vendor"), "0x8086\n").expect("vendor id");
+
+        assert!(!linux_has_nvidia_drm_device(root.path()));
+    }
 
     #[test]
     fn front_matter_title_wins() {

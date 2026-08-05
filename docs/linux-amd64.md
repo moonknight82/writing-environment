@@ -88,3 +88,15 @@ sudo apt install './Writing Environment_0.3.0_amd64.deb'
 | Project files | UTF-8 Markdown folders |
 
 The app does not load fonts or interface assets from the network. Editing and saving remain functional offline. Optional cloud synchronization uses a separately configured rclone 1.66-or-newer installation; provider credentials remain outside Writing Environment.
+
+### NVIDIA renderer compatibility
+
+On NVIDIA systems, Writing Environment automatically disables WebKitGTK's DMA-BUF renderer before creating the application window. This avoids repeated `DRM_IOCTL_MODE_CREATE_DUMB` and `Failed to create GBM buffer` errors seen with some NVIDIA driver and compositor combinations. Intel and AMD systems retain WebKitGTK's normal renderer.
+
+To force the compatibility renderer for a diagnostic launch:
+
+```sh
+WEBKIT_DISABLE_DMABUF_RENDERER=1 writing-environment
+```
+
+To override the automatic NVIDIA fallback and retry WebKitGTK's default renderer, set `WEBKIT_DISABLE_DMABUF_RENDERER=0` in the process environment. Source installations can make either override persistent in `~/.config/writing-environment/environment`.

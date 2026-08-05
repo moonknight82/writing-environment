@@ -4,5 +4,7 @@
 # this to ask Writing Environment to start in borderless maximized presentation mode.
 # WRITING_ENVIRONMENT_APPLIANCE=1
 #
-# Do not add WebKit renderer flags unless testing on your specific machine
-# proves one is necessary.
+# NVIDIA systems automatically use WebKitGTK's shared-memory renderer to avoid
+# DRM/GBM permission failures. Either value below overrides automatic detection.
+# WEBKIT_DISABLE_DMABUF_RENDERER=1
+# WEBKIT_DISABLE_DMABUF_RENDERER=0
