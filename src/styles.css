@@ -966,6 +966,8 @@ main.workspace-empty .sheet-list > * {
   position: relative;
   display: grid;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
   grid-template-rows: var(--toolbar-height) minmax(0, 1fr) var(--status-height);
   background-color: var(--canvas);
   background-image: var(--editor-background, none);
@@ -973,6 +975,7 @@ main.workspace-empty .sheet-list > * {
 
 .editor-toolbar {
   display: grid;
+  min-width: 0;
   grid-row: 1;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
@@ -981,10 +984,12 @@ main.workspace-empty .sheet-list > * {
 }
 
 .editor-wrap {
+  min-width: 0;
   grid-row: 2;
 }
 
 .editor-status {
+  min-width: 0;
   grid-row: 3;
 }
 
@@ -2295,11 +2300,30 @@ main.app-fullscreen .editor-toolbar {
   margin: 0 auto;
 }
 
+.editor-stage.preview-visible {
+  display: grid;
+  width: 100%;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  margin: 0;
+  overflow: hidden;
+}
+
+.writing-pane {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
 .markdown-preview {
   width: 100%;
+  min-height: 0;
   height: 100%;
   padding: clamp(42px, 8vh, 92px) clamp(28px, 7vw, 84px) 140px;
   overflow: auto;
+  border-left: 1px solid color-mix(in srgb, var(--border) 74%, transparent);
   color: var(--text);
   font-family: var(--prose-font);
   font-size: var(--editor-text-size, 19px);
@@ -2431,6 +2455,17 @@ main.app-fullscreen .editor-toolbar {
 .markdown-preview img {
   max-width: 100%;
   height: auto;
+}
+
+.editor-stage.preview-visible textarea,
+.editor-stage.preview-visible .markdown-preview {
+  padding-right: clamp(24px, 3vw, 52px);
+  padding-left: clamp(24px, 3vw, 52px);
+}
+
+.editor-stage.preview-visible .focus-overlay {
+  padding-right: calc(clamp(24px, 3vw, 52px) + var(--editor-scrollbar-width, 0px));
+  padding-left: clamp(24px, 3vw, 52px);
 }
 
 textarea,
@@ -3266,6 +3301,16 @@ textarea::selection {
 
   .editor-stage {
     width: 100%;
+  }
+
+  .editor-stage.preview-visible {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .editor-stage.preview-visible .markdown-preview {
+    border-top: 1px solid color-mix(in srgb, var(--border) 74%, transparent);
+    border-left: 0;
   }
 
   .external-change-banner {

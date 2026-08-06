@@ -16,7 +16,7 @@ The v0.1 desktop vertical slice and dedicated Raspberry Pi appliance image are c
 - a dedicated Projects area with persistent recent projects and pinning;
 - a permanent Inbox of ordinary Markdown files for writing before choosing a project;
 - native Markdown-folder selection;
-- explicit Write and formatted Markdown Preview modes, with sanitized rendering for headings, emphasis, lists, quotations, code, and tables;
+- a live split Markdown Preview beside the writable editor, with sanitized rendering for headings, emphasis, lists, quotations, code, and tables;
 - recursive Markdown discovery and metadata extraction;
 - sheet creation, rename, duplication, folder moves, and explicit multi-selection for batch move, export, or Trash actions;
 - safe Inbox-to-project moves that atomically place and verify the destination before removing the source;
@@ -74,7 +74,9 @@ Version 0.6.0 adds global, origin-labelled search across Inbox and every open pr
 
 Version 0.7.0 gives toolbar, sort, project, and sheet-action popovers consistent desktop behavior. Menus dismiss on outside clicks, Escape, or Tab; only one remains open; and keyboard users can navigate with arrows, Home/End, Enter/Space, and open project context menus with Shift+F10 or the Menu key. Focus returns to the originating control after Escape, with a quiet visible focus treatment inside menus.
 
-Update artifacts and `latest.json` are published through [GitHub Releases](https://github.com/moonknight82/writing-environment/releases). Every application update is verified with Tauri's embedded public signing key before installation. The private key is held only in the repository's GitHub Actions secrets. macOS uses a signed Tauri application archive; Linux amd64 and Raspberry Pi use signed Debian packages and request system authorization when installation begins.
+Version 0.7.1 keeps the editor writable while formatted Markdown Preview is active, using equal side-by-side panes on desktop and a stacked split on narrow windows. It also adds an automatic WebKitGTK rendering fallback for NVIDIA Linux systems and publishes a portable Linux x86-64 AppImage alongside the Debian package.
+
+Update artifacts and `latest.json` are published through [GitHub Releases](https://github.com/moonknight82/writing-environment/releases). Every application update is verified with Tauri's embedded public signing key before installation. The private key is held only in the repository's GitHub Actions secrets. macOS uses a signed Tauri application archive, Linux amd64 publishes Debian and AppImage formats, and Raspberry Pi uses signed Debian packages.
 
 The in-app updater remains application-only on desktop systems. On the Raspberry Pi appliance, the recommended Super+Space **Updates** action uses the signed APT repositories and can update both Raspberry Pi OS and the appliance packages. Neither path modifies projects, History, Trash, rclone credentials, or application preferences.
 

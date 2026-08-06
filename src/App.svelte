@@ -468,7 +468,7 @@ It passed the abandoned signal house before descending between black pines to th
   $: scheduleFocusOverlayRefresh(
     content,
     cursorPosition,
-    editorMode === "write" ? writingFocusMode : "off",
+    writingFocusMode,
   );
   $: universalSyncTargets = buildUniversalSyncTargets();
   $: syncNeedsInitialization = universalSyncTargets.some(
@@ -1268,14 +1268,12 @@ It passed the abandoned signal house before descending between black pines to th
     editorMode = mode;
     closeToolbarMenus();
 
-    if (mode === "write") {
-      requestAnimationFrame(() => {
-        if (!editorTextarea) return;
-        editorTextarea.focus();
-        editorTextarea.setSelectionRange(cursorPosition, cursorPosition);
-        scheduleFocusOverlayGeometryRefresh();
-      });
-    }
+    requestAnimationFrame(() => {
+      if (!editorTextarea) return;
+      editorTextarea.focus();
+      editorTextarea.setSelectionRange(cursorPosition, cursorPosition);
+      scheduleFocusOverlayGeometryRefresh();
+    });
   }
 
   function setSessionGoal(value: number): void {
@@ -4339,11 +4337,11 @@ It passed the abandoned signal house before descending between black pines to th
           class:active={editorMode === "preview"}
           class="editor-mode-button"
           disabled={!activeSheetPath}
-          aria-label={editorMode === "preview" ? "Return to writing" : "Preview formatted Markdown"}
+          aria-label={editorMode === "preview" ? "Hide formatted Markdown preview" : "Show formatted Markdown preview"}
           aria-pressed={editorMode === "preview"}
-          title={editorMode === "preview" ? "Return to Write mode (Command/Control+Shift+M)" : "Preview formatted Markdown (Command/Control+Shift+M)"}
+          title={editorMode === "preview" ? "Hide formatted Markdown preview (Command/Control+Shift+M)" : "Show formatted Markdown preview (Command/Control+Shift+M)"}
           onclick={() => setEditorMode(editorMode === "write" ? "preview" : "write")}
-        >{editorMode === "preview" ? "Write" : "Preview"}</button>
+        >Preview</button>
       </div>
 
       <div class="document-title">{activeSheet}</div>
@@ -4738,12 +4736,12 @@ It passed the abandoned signal house before descending between black pines to th
           <button
             class:active={writingFocusMode !== "off" || focusMenuVisible}
             class="writing-focus-button"
-            disabled={!activeSheetPath || editorMode === "preview"}
+            disabled={!activeSheetPath}
             aria-label={`Writing focus: ${writingFocusMode}`}
             aria-haspopup="menu"
             aria-expanded={focusMenuVisible}
             aria-controls={focusMenuVisible ? transientMenuDomId("focus") : undefined}
-            title={editorMode === "preview" ? "Writing focus is available in Write mode" : `Writing focus: ${writingFocusMode}`}
+            title={`Writing focus: ${writingFocusMode}`}
             onclick={(event) => toggleTransientPopover(event, "focus")}
           >
             <span class="focus-symbol" aria-hidden="true">◎</span>
@@ -5013,7 +5011,28 @@ It passed the abandoned signal house before descending between black pines to th
           {/if}
         </div>
       {:else}
-      <div class="editor-stage">
+      <div class:preview-visible={editorMode === "preview"} class="editor-stage">
+        <div class="writing-pane">
+          {#if writingFocusMode !== "off"}
+            <pre class="focus-overlay" aria-hidden="true" bind:this={focusOverlay}><span bind:this={focusBefore}></span><span class="active" bind:this={focusActive}></span><span bind:this={focusAfter}></span></pre>
+          {/if}
+          <textarea
+            bind:this={editorTextarea}
+            value={content}
+            class:focus-enabled={writingFocusMode !== "off"}
+            aria-label="Markdown manuscript"
+            autocapitalize="off"
+            autocomplete="off"
+            autocorrect={automaticCorrection ? "on" : "off"}
+            spellcheck={spellCheckEnabled}
+            oninput={(event) => handleEditorInput(event.currentTarget)}
+            onfocus={(event) => updateCursor(event.currentTarget)}
+            onclick={(event) => updateCursor(event.currentTarget)}
+            onkeyup={(event) => updateCursor(event.currentTarget)}
+            onselect={(event) => updateCursor(event.currentTarget)}
+            onscroll={(event) => syncFocusOverlay(event.currentTarget)}
+          ></textarea>
+        </div>
         {#if editorMode === "preview"}
           <article
             class="markdown-preview"
@@ -5021,26 +5040,6 @@ It passed the abandoned signal house before descending between black pines to th
           >
             {@html previewHtml}
           </article>
-        {:else}
-        {#if writingFocusMode !== "off"}
-          <pre class="focus-overlay" aria-hidden="true" bind:this={focusOverlay}><span bind:this={focusBefore}></span><span class="active" bind:this={focusActive}></span><span bind:this={focusAfter}></span></pre>
-        {/if}
-        <textarea
-          bind:this={editorTextarea}
-          value={content}
-          class:focus-enabled={writingFocusMode !== "off"}
-          aria-label="Markdown manuscript"
-          autocapitalize="off"
-          autocomplete="off"
-          autocorrect={automaticCorrection ? "on" : "off"}
-          spellcheck={spellCheckEnabled}
-          oninput={(event) => handleEditorInput(event.currentTarget)}
-          onfocus={(event) => updateCursor(event.currentTarget)}
-          onclick={(event) => updateCursor(event.currentTarget)}
-          onkeyup={(event) => updateCursor(event.currentTarget)}
-          onselect={(event) => updateCursor(event.currentTarget)}
-          onscroll={(event) => syncFocusOverlay(event.currentTarget)}
-        ></textarea>
         {/if}
       </div>
       {/if}
