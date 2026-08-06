@@ -41,7 +41,7 @@ The reproducible package builder uses a Debian 12 amd64 container, even when inv
 scripts/linux-amd64/build-packages.sh
 ```
 
-It exports an amd64 `.deb` and `SHA256SUMS` under a new timestamped `artifacts/linux-amd64/` directory. This also works under amd64 emulation on an ARM development machine.
+It exports an amd64 `.deb` and `SHA256SUMS` under a new timestamped `artifacts/linux-amd64/` directory. This also works under amd64 emulation on an ARM development machine. Tagged GitHub releases additionally build and publish an x86-64 AppImage on a native Ubuntu runner.
 
 On an Apple Silicon or Intel Mac with Docker Desktop running, use the purpose-named wrapper:
 
@@ -68,7 +68,7 @@ chmod +x Writing\ Environment_0.3.0_amd64.AppImage
 ./Writing\ Environment_0.3.0_amd64.AppImage
 ```
 
-The exact generated filename may vary slightly with the Tauri bundler version. The AppImage is unsigned in this development milestone, so verify it against `SHA256SUMS` after transferring it.
+The exact generated filename may vary slightly with the Tauri bundler version. GitHub release AppImages include Tauri's signed updater artifact; locally produced packages include updater signatures when the Writing Environment signing key is available. Use `SHA256SUMS` to verify manually transferred local builds.
 
 Install the Debian package with:
 

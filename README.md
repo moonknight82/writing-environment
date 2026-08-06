@@ -167,7 +167,7 @@ On macOS, the explicit entry point is:
 scripts/linux-amd64/build-on-mac.sh
 ```
 
-Use `--with-appimage` on a native x86-64 Docker host to create both `.deb` and AppImage packages.
+Use `--with-appimage` on a native x86-64 Docker host to create both `.deb` and AppImage packages. Tagged GitHub releases publish both formats: the `.deb` remains the native Debian/Ubuntu option, while the AppImage is the portable download for Fedora and other x86-64 distributions.
 
 See the [Linux amd64 guide](docs/linux-amd64.md) for compatibility, packaging, update, and uninstall details.
 

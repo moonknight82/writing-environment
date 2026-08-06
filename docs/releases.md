@@ -18,7 +18,7 @@ The current macOS package uses ad-hoc Apple code signing for personal testing. T
 4. Commit the release changes.
 5. Create and push a matching tag, such as `v0.3.1`.
 6. Watch the **Publish signed desktop release** workflow. The draft release becomes public only after every required job succeeds.
-7. Confirm the GitHub Release contains `latest.json`, signed desktop artifacts, the Raspberry Pi manual archive, and the four appliance/repository packages.
+7. Confirm the GitHub Release contains `latest.json`, the signed Linux amd64 `.deb` and AppImage artifacts, the signed macOS artifact, the Raspberry Pi manual archive, and the four appliance/repository packages.
 8. Confirm the Pages deployment publishes a valid signed APT repository at `https://moonknight82.github.io/writing-environment/apt`.
 9. Test both **Writer (Aa) → Application updates → Check for Updates…** and **Super+Space → Updates** before relying on automatic checks.
 
