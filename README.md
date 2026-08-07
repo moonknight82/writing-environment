@@ -76,6 +76,8 @@ Version 0.7.0 gives toolbar, sort, project, and sheet-action popovers consistent
 
 Version 0.7.1 keeps the editor writable while formatted Markdown Preview is active, using equal side-by-side panes on desktop and a stacked split on narrow windows. It also adds an automatic WebKitGTK rendering fallback for NVIDIA Linux systems and publishes a portable Linux x86-64 AppImage alongside the Debian package.
 
+Version 0.7.2 supersedes the source-only v0.7.1 tag after a GitHub Actions outage prevented that release from building. Linux x86-64 releases now include a Fedora RPM in addition to the Debian package and portable AppImage.
+
 Update artifacts and `latest.json` are published through [GitHub Releases](https://github.com/moonknight82/writing-environment/releases). Every application update is verified with Tauri's embedded public signing key before installation. The private key is held only in the repository's GitHub Actions secrets. macOS uses a signed Tauri application archive, Linux amd64 publishes Debian and AppImage formats, and Raspberry Pi uses signed Debian packages.
 
 The in-app updater remains application-only on desktop systems. On the Raspberry Pi appliance, the recommended Super+Space **Updates** action uses the signed APT repositories and can update both Raspberry Pi OS and the appliance packages. Neither path modifies projects, History, Trash, rclone credentials, or application preferences.
@@ -169,7 +171,7 @@ On macOS, the explicit entry point is:
 scripts/linux-amd64/build-on-mac.sh
 ```
 
-Use `--with-appimage` on a native x86-64 Docker host to create both `.deb` and AppImage packages. Tagged GitHub releases publish both formats: the `.deb` remains the native Debian/Ubuntu option, while the AppImage is the portable download for Fedora and other x86-64 distributions.
+Use `--with-portable` on a native x86-64 Docker host to create `.deb`, AppImage, and RPM packages. Tagged GitHub releases publish all three formats: `.deb` for Debian/Ubuntu, RPM for Fedora, and AppImage as the portable fallback for other x86-64 distributions. The former `--with-appimage` option remains available as an alias.
 
 See the [Linux amd64 guide](docs/linux-amd64.md) for compatibility, packaging, update, and uninstall details.
 

@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libwebkit2gtk-4.1-dev \
     libxdo-dev \
     patchelf \
+    rpm \
     wget \
   && rm -rf /var/lib/apt/lists/*
 
@@ -42,7 +43,7 @@ RUN --mount=type=cache,target=/root/.cargo/registry \
   && pnpm tauri build --verbose --bundles "$TAURI_BUNDLES" $updater_args \
   && mkdir -p /artifacts \
   && find src-tauri/target/release/bundle -type f \
-    \( -name '*.AppImage' -o -name '*.deb' -o -name '*.sig' \) \
+    \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.sig' \) \
     -exec cp '{}' /artifacts/ \; \
   && test "$(find /artifacts -type f | wc -l)" -ge 1 \
   && cd /artifacts \
