@@ -1,19 +1,21 @@
-Version 0.7.2 turns formatted Markdown Preview into a live companion to the
-editor instead of replacing the writing surface. Desktop windows divide the
-available writing area into equal editor and preview panes with independent
-scrolling. Narrow windows retain both surfaces in a stacked split, and Writing
-Focus remains available while Preview is active.
+Version 0.8.0 adds optional, on-demand grammar and style review through a
+writer-controlled, self-hosted LanguageTool server. Review supports English and
+Portuguese language variants and stays outside the typing and autosave paths.
+The connection test reads only LanguageTool's language list; manuscript text is
+sent only when the writer explicitly chooses **Check sheet**.
 
-Linux now detects NVIDIA graphics hardware before WebKitGTK starts and selects
-its shared-memory renderer when necessary. This avoids DRM/GBM permission
-failures seen with some NVIDIA driver and compositor combinations while leaving
-Intel and AMD rendering unchanged. An explicit environment setting can still
-override the automatic choice.
+Review findings remain non-destructive. Each suggestion includes its rule or
+category, explanation, context, and available replacements. Markdown syntax,
+front matter, code, and link destinations are masked without shifting source
+offsets. Suggestions become stale when the sheet changes, and a replacement is
+applied only while its reviewed source range still matches the current draft.
 
-Linux x86-64 releases now publish three verified formats: Debian packages for
-Debian and Ubuntu, RPM packages for Fedora, and portable AppImages for other
-distributions. Version 0.7.2 supersedes the source-only v0.7.1 tag, whose binary
-workflow was prevented from starting by a GitHub Actions outage.
+Self-hosted deployments may run on the writer's computer, NAS, or another
+private server. Public unencrypted endpoints are rejected, while private-network
+HTTP requires a visible acknowledgement. The repository includes a reproducible
+Docker and Portainer package built from the checksummed official LanguageTool
+6.6 standalone archive for ARM64 and x86-64 hosts. Dependency audits now run in
+continuous integration as an additional release check.
 
 This is a personal project under active development. Back up important writing
 and review the release notes before updating.
