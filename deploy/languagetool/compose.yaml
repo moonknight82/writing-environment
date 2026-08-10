@@ -1,0 +1,18 @@
+services:
+  languagetool:
+    image: writing-environment-languagetool:6.6
+    pull_policy: never
+    container_name: writing-environment-languagetool
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      JAVA_TOOL_OPTIONS: -Xms128m -Xmx768m
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m
+      - /home/languagetool:size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

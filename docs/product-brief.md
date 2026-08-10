@@ -38,6 +38,7 @@ The application must be tested on that device before a feature is considered com
 - Persistent session word goal with live progress
 - Visible local-save and synchronization state
 - Current-sheet DOCX, PDF, and EPUB export with predictable manuscript structure
+- Optional grammar and style review through a writer-controlled, self-hosted LanguageTool server
 
 ## Performance budgets
 

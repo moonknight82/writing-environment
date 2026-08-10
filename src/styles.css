@@ -2300,7 +2300,8 @@ main.app-fullscreen .editor-toolbar {
   margin: 0 auto;
 }
 
-.editor-stage.preview-visible {
+.editor-stage.preview-visible,
+.editor-stage.review-visible {
   display: grid;
   width: 100%;
   min-height: 0;
@@ -2331,6 +2332,264 @@ main.app-fullscreen .editor-toolbar {
   letter-spacing: var(--prose-letter-spacing, normal);
   overflow-wrap: anywhere;
   text-shadow: var(--prose-text-shadow, none);
+}
+
+.review-panel {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  padding: 30px clamp(22px, 3.5vw, 52px) 80px;
+  overflow: auto;
+  border-left: 1px solid color-mix(in srgb, var(--border) 74%, transparent);
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 56%, transparent);
+}
+
+.review-heading,
+.review-finding-heading,
+.review-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.review-heading {
+  margin-bottom: 20px;
+}
+
+.review-heading h2 {
+  margin: 2px 0 0;
+  font-family: var(--prose-font);
+  font-size: 24px;
+  font-weight: 650;
+}
+
+.review-working {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.review-settings {
+  display: grid;
+  gap: 11px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface-raised) 72%, transparent);
+}
+
+.review-settings label {
+  display: grid;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.review-settings input,
+.review-settings select {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-size: 11px;
+}
+
+.review-settings .review-test-button {
+  justify-self: start;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.review-settings .review-test-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.review-settings .review-network-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 7px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent-soft) 74%, transparent);
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.review-settings .review-network-consent input {
+  width: 15px;
+  min-height: 15px;
+  margin: 1px 0 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+.review-settings .review-network-consent span {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.review-connection-message {
+  overflow-wrap: anywhere;
+}
+
+.review-settings p,
+.review-consent p,
+.review-clear-state p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.review-consent,
+.review-clear-state {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  margin-top: 18px;
+  padding: 18px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+}
+
+.review-consent button,
+.review-actions button,
+.review-finding button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.review-consent button,
+.review-actions .review-primary {
+  border-color: var(--accent);
+  color: var(--surface-raised);
+  background: var(--accent);
+}
+
+.review-actions {
+  margin-top: 14px;
+  justify-content: flex-start;
+}
+
+.review-actions button:disabled,
+.review-finding button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.review-message {
+  margin: 14px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.review-findings {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.review-finding {
+  display: grid;
+  gap: 9px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface-raised) 82%, transparent);
+}
+
+.review-finding.stale {
+  opacity: 0.58;
+}
+
+.review-finding > strong {
+  font-family: var(--prose-font);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.review-finding-heading span {
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.review-finding-heading button {
+  min-height: 24px;
+  padding: 0 7px;
+  border: 0;
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.review-context {
+  margin: 0;
+  padding: 9px 10px;
+  border-left: 2px solid var(--accent);
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--canvas) 62%, transparent);
+  font-family: var(--prose-font);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.review-replacements {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.review-replacements button {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
+  color: var(--accent);
+}
+
+.review-clear-state {
+  justify-items: center;
+  text-align: center;
+}
+
+.review-clear-state > span {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--surface-raised);
+  background: var(--accent);
+  font-weight: 800;
 }
 
 .markdown-preview > :first-child {
@@ -2458,7 +2717,8 @@ main.app-fullscreen .editor-toolbar {
 }
 
 .editor-stage.preview-visible textarea,
-.editor-stage.preview-visible .markdown-preview {
+.editor-stage.preview-visible .markdown-preview,
+.editor-stage.review-visible textarea {
   padding-right: clamp(24px, 3vw, 52px);
   padding-left: clamp(24px, 3vw, 52px);
 }
@@ -3308,7 +3568,17 @@ textarea::selection {
     grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
   }
 
+  .editor-stage.review-visible {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
   .editor-stage.preview-visible .markdown-preview {
+    border-top: 1px solid color-mix(in srgb, var(--border) 74%, transparent);
+    border-left: 0;
+  }
+
+  .editor-stage.review-visible .review-panel {
     border-top: 1px solid color-mix(in srgb, var(--border) 74%, transparent);
     border-left: 0;
   }

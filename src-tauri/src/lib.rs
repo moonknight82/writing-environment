@@ -10,6 +10,7 @@ use uuid::Uuid;
 use walkdir::WalkDir;
 
 mod document_export;
+mod language_tool;
 mod project_watch;
 mod search_index;
 mod sync;
@@ -2178,6 +2179,8 @@ pub fn run() {
             open_inbox,
             ensure_project_identity,
             read_sheet,
+            language_tool::check_grammar_style,
+            language_tool::test_language_tool_connection,
             export_sheet_docx,
             export_sheet_pdf,
             export_sheet_epub,

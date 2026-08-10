@@ -30,6 +30,12 @@ jobs:
         with:
           workspaces: ./src-tauri -> target
       - run: pnpm install --frozen-lockfile
+      - name: Audit JavaScript dependencies
+        run: pnpm audit
+      - name: Install Rust dependency auditor
+        run: cargo install cargo-audit --locked --version 0.22.2
+      - name: Audit Rust dependencies
+        run: cargo audit --file src-tauri/Cargo.lock
       - name: Validate release metadata
         run: scripts/release/verify.sh
       - run: pnpm build

@@ -125,6 +125,31 @@ Planned:
 - [ ] Keep popovers within the visible window at the Raspberry Pi's minimum supported display size.
 - [ ] Smoke-test the interaction model with mouse and keyboard on macOS, Linux amd64, and the physical Raspberry Pi.
 
+## v0.8 — Grammar and style review
+
+Planned in staged, optional increments:
+
+1. [x] Add an on-demand Review mode backed by the LanguageTool HTTP API, with explicit language selection and support for English and Brazilian Portuguese.
+2. [x] Keep grammar and style analysis out of the keystroke and autosave paths. Run only after an explicit Check sheet action, discard late results for changed or switched sheets, and never block ordinary writing when the checker is unavailable.
+3. [x] Present findings as non-destructive suggestions with category, explanation, and replacements. Apply a replacement only when the checked text still matches the current draft.
+4. [x] Mask Markdown syntax, front matter, code, and link destinations before review without shifting UTF-16 source offsets.
+5. [ ] Allow individual rules and project vocabulary to be ignored without adding metadata to manuscript files. Individual findings can already be dismissed for the current review.
+6. [x] Officially support self-hosted LanguageTool on the writer's computer, NAS, or private server. Test the server without sending manuscript text, reject public unencrypted endpoints, and require an explicit warning acknowledgement for ordinary HTTP across a private network.
+7. [x] Provide a reproducible Docker/Portainer deployment built from the checksummed official LanguageTool 6.6 standalone archive for ARM64 and x86 NAS hosts.
+8. [ ] Measure review latency and application memory use on the physical 2 GB Raspberry Pi while the LanguageTool service runs on the NAS. Keep the Java service out of the appliance image unless a later benchmark justifies local inclusion.
+
+Write mode remains the low-latency native textarea. Review is an optional layer and never changes Markdown merely because a suggestion was detected. Hosted LanguageTool services are outside the supported v0.8 configuration.
+
+## v0.9 — Scrivener interchange
+
+Planned in two compatible export paths:
+
+1. [ ] Add and document a Scrivener-compatible DOCX preset that exports sheet titles with structural Heading styles, allowing Scrivener's Import and Split command to create one Binder document per sheet.
+2. [ ] Verify project, folder, and selected-sheet DOCX imports in current macOS and Windows Scrivener releases, including Unicode text, headings, emphasis, scene breaks, and deterministic sheet order.
+3. [ ] Add OPML project export that maps nested Markdown folders and sheets to a Scrivener Binder hierarchy and carries each sheet's text as the corresponding outline item's attached text.
+4. [ ] Validate OPML imports with attached text directed to Scrivener's Main Text, and document the required Scrivener import setting.
+5. [ ] Keep both exports one-way and non-destructive. Do not generate or modify native `.scriv` project bundles unless Literature & Latte publishes a stable interchange specification.
+
 ## Later work
 
 - plugin architecture and marketplace;

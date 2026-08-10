@@ -189,6 +189,12 @@ The public release workflow builds macOS Apple Silicon, Linux amd64, and Raspber
 
 Native system spelling and grammar checking are enabled by default and can be changed in the Writer (`Aa`) panel. Linux builds initialize WebKitGTK with the bundled English (US) and Brazilian Portuguese Hunspell dictionaries; macOS builds enable WebKit's continuous spelling and grammar services. Writing Focus preserves the operating system's native underlines. Automatic correction remains off by default so the operating system cannot silently rewrite manuscript text unless the writer opts in.
 
+Optional on-demand grammar and style review supports a writer-controlled, self-hosted LanguageTool
+server. The feature remains off until its no-text connection test succeeds and the writer enables it;
+manuscript text is sent only when **Check sheet** is chosen. A reproducible Docker/Portainer package
+for ARM64 and x86 NAS hosts is documented in
+[`deploy/languagetool`](deploy/languagetool/README.md).
+
 ## Project documents
 
 - [Product brief](docs/product-brief.md)

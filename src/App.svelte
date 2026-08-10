@@ -45,6 +45,11 @@
   import { applyTheme, themes } from "./lib/themes";
   import { exportDocument, type ExportFormat } from "./lib/documentExport";
   import { renderMarkdownPreview } from "./lib/markdownPreview";
+  import {
+    checkGrammarStyle,
+    testLanguageToolConnection,
+    type ReviewMatch,
+  } from "./lib/languageTool";
 
   interface FolderSummary {
     path: string;
@@ -102,7 +107,7 @@
   }
 
   type WritingFocusMode = "off" | "paragraph" | "sentence";
-  type EditorMode = "write" | "preview";
+  type EditorMode = "write" | "preview" | "review";
   type SheetSort = "created-desc" | "created-asc" | "title-asc" | "title-desc";
   type ExportScope = "sheet" | "selection" | "folder" | "project";
   type BulkSheetAction = "move" | "trash";
@@ -169,6 +174,14 @@
   const RECENT_SHEETS_KEY = "writing-environment.recent-sheets";
   const FAVORITE_SHEETS_KEY = "writing-environment.favorite-sheets";
   const RECENT_SHEET_LIMIT = 40;
+  const REVIEW_ENABLED_KEY = "writing-environment.review-enabled";
+  const REVIEW_ENDPOINT_KEY = "writing-environment.review-endpoint";
+  const REVIEW_LANGUAGE_KEY = "writing-environment.review-language";
+  const DEFAULT_REVIEW_ENDPOINT = "http://127.0.0.1:8081/v2/check";
+
+  interface ReviewFinding extends ReviewMatch {
+    checkedText: string;
+  }
 
   const prototypeSheets: SheetSummary[] = [
     {
@@ -293,6 +306,30 @@ It passed the abandoned signal house before descending between black pines to th
   const sessionCounts = new Map<string, number>();
   let content = desktopMode ? "" : initialText;
   let previewHtml = "";
+  let reviewEnabled = false;
+  let reviewEndpoint = DEFAULT_REVIEW_ENDPOINT;
+  let reviewLanguage = "en-US";
+  let reviewRunning = false;
+  let reviewFindings: ReviewFinding[] = [];
+  let reviewedContent = "";
+  let reviewMessage = "";
+  let reviewStale = false;
+  let reviewRequest = 0;
+  let reviewConnectionAttempt = 0;
+  let reviewConnectionTesting = false;
+  let reviewConnectionFingerprint = "";
+  let reviewConnectionMessage = "";
+  let reviewConnectionError = false;
+  let reviewConnectionEncrypted = false;
+  let reviewConnectionLoopback = false;
+  let reviewLanAcknowledged = false;
+  $: currentReviewConnection = `${reviewEndpoint.trim()}|${reviewLanguage}`;
+  $: reviewConnectionVerified = reviewConnectionFingerprint === currentReviewConnection;
+  $: reviewNeedsLanAcknowledgement = reviewConnectionVerified
+    && !reviewConnectionEncrypted
+    && !reviewConnectionLoopback;
+  $: reviewConnectionReady = reviewConnectionVerified
+    && (!reviewNeedsLanAcknowledgement || reviewLanAcknowledged);
   let currentWordCount = wordCount(content);
   let typingMetricsTimer: ReturnType<typeof setTimeout> | undefined;
   let persistedContent = content;
@@ -525,6 +562,8 @@ It passed the abandoned signal house before descending between black pines to th
       : Number(storedSessionGoalValue);
     const storedSheetSort = localStorage.getItem("writing-environment.sheet-sort");
     const storedAutomaticUpdateChecks = localStorage.getItem("writing-environment.automatic-update-checks");
+    const storedReviewEndpoint = localStorage.getItem(REVIEW_ENDPOINT_KEY)?.trim();
+    const storedReviewLanguage = localStorage.getItem(REVIEW_LANGUAGE_KEY);
     const selected = themes.find((theme) => theme.id === savedTheme) ?? themes[0];
 
     exportAuthor = localStorage.getItem(EXPORT_AUTHOR_KEY) ?? "";
@@ -549,6 +588,9 @@ It passed the abandoned signal house before descending between black pines to th
     spellCheckEnabled = storedSpellCheck !== "false";
     automaticCorrection = spellCheckEnabled && storedAutomaticCorrection === "true";
     automaticUpdateChecks = storedAutomaticUpdateChecks !== "false";
+    reviewEnabled = localStorage.getItem(REVIEW_ENABLED_KEY) === "true";
+    reviewEndpoint = storedReviewEndpoint || DEFAULT_REVIEW_ENDPOINT;
+    if (isReviewLanguage(storedReviewLanguage)) reviewLanguage = storedReviewLanguage;
     if (isSheetSort(storedSheetSort)) sheetSort = storedSheetSort;
 
     if (Number.isFinite(savedLineHeight)) setLineHeight(savedLineHeight);
@@ -598,6 +640,7 @@ It passed the abandoned signal house before descending between black pines to th
     if (updateCheckTimer) clearTimeout(updateCheckTimer);
     if (typingMetricsTimer) clearTimeout(typingMetricsTimer);
     if (focusOverlayFrame !== undefined) cancelAnimationFrame(focusOverlayFrame);
+    reviewRequest += 1;
     windowStateUnlisten?.();
     libraryChangeUnlisten?.();
     if (desktopAvailable()) void unwatchLibrary();
@@ -828,6 +871,9 @@ It passed the abandoned signal house before descending between black pines to th
     const scrollTop = editorTextarea?.scrollTop ?? 0;
     const scrollLeft = editorTextarea?.scrollLeft ?? 0;
     preserveSessionProgressForExternalCount(wordCount(value));
+    if (reviewedContent && value !== reviewedContent) {
+      invalidateReview("The sheet changed on disk after this review. Check it again for current results.");
+    }
     content = value;
     cursorPosition = Math.min(value.length, selectionStart);
     requestAnimationFrame(() => {
@@ -921,6 +967,7 @@ It passed the abandoned signal house before descending between black pines to th
     dirty = false;
     saveStatus = "No sheet open";
     clearExternalConflict();
+    resetReview();
     rememberLastWorkspace();
   }
 
@@ -1276,6 +1323,218 @@ It passed the abandoned signal house before descending between black pines to th
     });
   }
 
+  function isReviewLanguage(value: string | null): value is "en-US" | "en-GB" | "pt-BR" | "pt-PT" {
+    return value === "en-US" || value === "en-GB" || value === "pt-BR" || value === "pt-PT";
+  }
+
+  function setReviewEnabled(enabled: boolean): void {
+    reviewEnabled = enabled;
+    localStorage.setItem(REVIEW_ENABLED_KEY, String(enabled));
+    if (!enabled) {
+      reviewRequest += 1;
+      reviewRunning = false;
+      reviewFindings = [];
+      reviewedContent = "";
+      reviewStale = false;
+      reviewMessage = "Grammar and style review is off.";
+    } else {
+      reviewMessage = "Ready. Your sheet is sent only when you choose Check sheet.";
+    }
+  }
+
+  function setReviewEndpoint(value: string): void {
+    reviewEndpoint = value;
+    localStorage.setItem(REVIEW_ENDPOINT_KEY, value.trim());
+    invalidateReviewConnection();
+    invalidateReview("Checker settings changed. Check the sheet again.");
+  }
+
+  function setReviewLanguage(value: string): void {
+    if (!isReviewLanguage(value)) return;
+    reviewLanguage = value;
+    localStorage.setItem(REVIEW_LANGUAGE_KEY, value);
+    invalidateReviewConnection();
+    invalidateReview("Review language changed. Check the sheet again.");
+  }
+
+  function invalidateReviewConnection(): void {
+    reviewConnectionAttempt += 1;
+    reviewConnectionTesting = false;
+    reviewConnectionFingerprint = "";
+    reviewConnectionMessage = "";
+    reviewConnectionError = false;
+    reviewConnectionEncrypted = false;
+    reviewConnectionLoopback = false;
+    reviewLanAcknowledged = false;
+  }
+
+  async function testReviewConnection(): Promise<void> {
+    if (reviewConnectionTesting || reviewRunning) return;
+    if (!desktopAvailable()) {
+      reviewConnectionError = true;
+      reviewConnectionMessage = "Connection testing is available in the installed desktop app.";
+      return;
+    }
+    if (!reviewEndpoint.trim()) {
+      reviewConnectionError = true;
+      reviewConnectionMessage = "Enter the address of your self-hosted LanguageTool server.";
+      return;
+    }
+
+    const attempt = ++reviewConnectionAttempt;
+    const fingerprint = currentReviewConnection;
+    reviewConnectionTesting = true;
+    reviewConnectionError = false;
+    reviewConnectionMessage = "Testing the server without sending manuscript text…";
+    try {
+      const result = await testLanguageToolConnection({
+        endpoint: reviewEndpoint.trim(),
+        language: reviewLanguage,
+      });
+      if (attempt !== reviewConnectionAttempt || fingerprint !== currentReviewConnection) return;
+      reviewConnectionFingerprint = fingerprint;
+      reviewConnectionEncrypted = result.encrypted;
+      reviewConnectionLoopback = result.loopback;
+      reviewConnectionMessage = `${result.languageName || reviewLanguage} is available at ${result.address}.`;
+      reviewConnectionError = false;
+    } catch (error) {
+      if (attempt !== reviewConnectionAttempt) return;
+      reviewConnectionFingerprint = "";
+      reviewConnectionError = true;
+      reviewConnectionMessage = errorText(error);
+    } finally {
+      if (attempt === reviewConnectionAttempt) reviewConnectionTesting = false;
+    }
+  }
+
+  function resetReview(): void {
+    reviewRequest += 1;
+    reviewRunning = false;
+    reviewFindings = [];
+    reviewedContent = "";
+    reviewMessage = "";
+    reviewStale = false;
+  }
+
+  function invalidateReview(message: string): void {
+    if (!reviewedContent && reviewFindings.length === 0) return;
+    reviewRequest += 1;
+    reviewRunning = false;
+    reviewStale = true;
+    reviewMessage = message;
+  }
+
+  async function runGrammarReview(): Promise<void> {
+    if (!reviewEnabled || reviewRunning || !activeSheetPath) return;
+    if (!desktopAvailable()) {
+      reviewMessage = "Grammar review is available in the installed desktop app.";
+      return;
+    }
+    if (!reviewEndpoint.trim()) {
+      reviewMessage = "Enter the address of your self-hosted LanguageTool server.";
+      return;
+    }
+    if (!reviewConnectionReady) {
+      reviewMessage = "Test and approve this LanguageTool connection before checking the sheet.";
+      return;
+    }
+    if (!content.trim()) {
+      reviewFindings = [];
+      reviewedContent = content;
+      reviewStale = false;
+      reviewMessage = "This sheet has no text to review.";
+      return;
+    }
+
+    const requestId = ++reviewRequest;
+    const sheetPath = activeSheetPath;
+    const snapshot = content;
+    reviewRunning = true;
+    reviewFindings = [];
+    reviewedContent = "";
+    reviewStale = false;
+    reviewMessage = "Checking grammar and style…";
+    try {
+      const result = await checkGrammarStyle({
+        endpoint: reviewEndpoint.trim(),
+        language: reviewLanguage,
+        text: snapshot,
+      });
+      if (requestId !== reviewRequest || activeSheetPath !== sheetPath) return;
+      if (content !== snapshot) {
+        reviewStale = true;
+        reviewMessage = "The sheet changed during review. Check it again for current results.";
+        return;
+      }
+      reviewedContent = snapshot;
+      reviewFindings = result.matches
+        .filter((finding) => finding.offset + finding.length <= snapshot.length)
+        .map((finding) => ({
+          ...finding,
+          checkedText: snapshot.slice(finding.offset, finding.offset + finding.length),
+        }));
+      reviewMessage = reviewFindings.length === 0
+        ? "No grammar or style issues were found."
+        : `${reviewFindings.length} ${reviewFindings.length === 1 ? "suggestion" : "suggestions"} found.`;
+    } catch (error) {
+      if (requestId !== reviewRequest) return;
+      reviewMessage = errorText(error);
+    } finally {
+      if (requestId === reviewRequest) reviewRunning = false;
+    }
+  }
+
+  function applyReviewReplacement(finding: ReviewFinding, replacement: string): void {
+    const end = finding.offset + finding.length;
+    if (
+      reviewStale
+      || content !== reviewedContent
+      || content.slice(finding.offset, end) !== finding.checkedText
+    ) {
+      invalidateReview("The draft changed at this suggestion. Check the sheet again before applying it.");
+      return;
+    }
+
+    const nextContent = content.slice(0, finding.offset) + replacement + content.slice(end);
+    const difference = replacement.length - finding.length;
+    reviewFindings = reviewFindings.flatMap((candidate) => {
+      if (candidate === finding) return [];
+      const candidateEnd = candidate.offset + candidate.length;
+      if (candidateEnd <= finding.offset) return [candidate];
+      if (candidate.offset >= end) {
+        return [{ ...candidate, offset: candidate.offset + difference }];
+      }
+      return [];
+    });
+    content = nextContent;
+    reviewedContent = nextContent;
+    cursorPosition = finding.offset + replacement.length;
+    reviewMessage = reviewFindings.length === 0
+      ? "All review suggestions have been handled."
+      : `${reviewFindings.length} ${reviewFindings.length === 1 ? "suggestion remains" : "suggestions remain"}.`;
+    scheduleTypingMetrics();
+    handleInput();
+    requestAnimationFrame(() => {
+      if (!editorTextarea) return;
+      editorTextarea.focus();
+      editorTextarea.setSelectionRange(cursorPosition, cursorPosition);
+    });
+  }
+
+  function dismissReviewFinding(finding: ReviewFinding): void {
+    reviewFindings = reviewFindings.filter((candidate) => candidate !== finding);
+    reviewMessage = reviewFindings.length === 0
+      ? "All review suggestions have been handled."
+      : `${reviewFindings.length} ${reviewFindings.length === 1 ? "suggestion remains" : "suggestions remain"}.`;
+  }
+
+  function reviewCategory(finding: ReviewFinding): string {
+    return finding.rule.category.name
+      || finding.rule.description
+      || finding.rule.issueType
+      || "Suggestion";
+  }
+
   function setSessionGoal(value: number): void {
     sessionGoal = Math.min(100000, Math.max(0, Math.round(Number.isFinite(value) ? value : 0)));
     sessionGoalDraft = sessionGoal;
@@ -1295,6 +1554,10 @@ It passed the abandoned signal house before descending between black pines to th
 
   function handleEditorInput(target: HTMLTextAreaElement): void {
     content = target.value;
+    if (reviewedContent && content !== reviewedContent) {
+      reviewStale = true;
+      reviewMessage = "The sheet changed after this review. Check it again for current results.";
+    }
     updateCursor(target);
     scheduleTypingMetrics();
     handleInput();
@@ -1474,6 +1737,7 @@ It passed the abandoned signal house before descending between black pines to th
     if (dirty && !(await persistCurrentSheet())) return;
 
     clearExternalConflict();
+    resetReview();
     activeSheet = sheet.title;
     activeSheetPath = sheet.relativePath;
     if (!searchQuery.trim() && !trashActive) {
@@ -4342,6 +4606,15 @@ It passed the abandoned signal house before descending between black pines to th
           title={editorMode === "preview" ? "Hide formatted Markdown preview (Command/Control+Shift+M)" : "Show formatted Markdown preview (Command/Control+Shift+M)"}
           onclick={() => setEditorMode(editorMode === "write" ? "preview" : "write")}
         >Preview</button>
+        <button
+          class:active={editorMode === "review"}
+          class="editor-mode-button"
+          disabled={!activeSheetPath}
+          aria-label={editorMode === "review" ? "Hide grammar and style review" : "Show grammar and style review"}
+          aria-pressed={editorMode === "review"}
+          title={editorMode === "review" ? "Hide grammar and style review" : "Review grammar and style"}
+          onclick={() => setEditorMode(editorMode === "review" ? "write" : "review")}
+        >Review</button>
       </div>
 
       <div class="document-title">{activeSheet}</div>
@@ -5011,7 +5284,11 @@ It passed the abandoned signal house before descending between black pines to th
           {/if}
         </div>
       {:else}
-      <div class:preview-visible={editorMode === "preview"} class="editor-stage">
+      <div
+        class:preview-visible={editorMode === "preview"}
+        class:review-visible={editorMode === "review"}
+        class="editor-stage"
+      >
         <div class="writing-pane">
           {#if writingFocusMode !== "off"}
             <pre class="focus-overlay" aria-hidden="true" bind:this={focusOverlay}><span bind:this={focusBefore}></span><span class="active" bind:this={focusActive}></span><span bind:this={focusAfter}></span></pre>
@@ -5040,6 +5317,118 @@ It passed the abandoned signal house before descending between black pines to th
           >
             {@html previewHtml}
           </article>
+        {:else if editorMode === "review"}
+          <aside class="review-panel" aria-label={`Grammar and style review for ${activeSheet}`}>
+            <header class="review-heading">
+              <div>
+                <p class="eyebrow">Grammar and style</p>
+                <h2>Review</h2>
+              </div>
+              {#if reviewRunning}<span class="review-working" aria-live="polite">Checking…</span>{/if}
+            </header>
+
+            <div class="review-settings">
+              <label>
+                <span>Language</span>
+                <select
+                  value={reviewLanguage}
+                  disabled={reviewRunning || reviewConnectionTesting}
+                  onchange={(event) => setReviewLanguage(event.currentTarget.value)}
+                >
+                  <option value="en-US">English (US)</option>
+                  <option value="en-GB">English (UK)</option>
+                  <option value="pt-BR">Português (Brasil)</option>
+                  <option value="pt-PT">Português (Portugal)</option>
+                </select>
+              </label>
+              <label>
+                <span>Self-hosted LanguageTool address</span>
+                <input
+                  type="url"
+                  spellcheck="false"
+                  value={reviewEndpoint}
+                  disabled={reviewRunning || reviewConnectionTesting}
+                  placeholder={DEFAULT_REVIEW_ENDPOINT}
+                  oninput={(event) => setReviewEndpoint(event.currentTarget.value)}
+                />
+              </label>
+              <p>
+                Use an official self-hosted LanguageTool server on this computer, your NAS, or another
+                server you control. Testing reads its language list and sends no manuscript text.
+              </p>
+              <button
+                class="review-test-button"
+                disabled={reviewRunning || reviewConnectionTesting}
+                onclick={() => void testReviewConnection()}
+              >{reviewConnectionTesting ? "Testing…" : reviewConnectionVerified ? "Test again" : "Test connection"}</button>
+              {#if reviewConnectionMessage}
+                <p class:error-text={reviewConnectionError} class="review-connection-message" aria-live="polite">{reviewConnectionMessage}</p>
+              {/if}
+              {#if reviewNeedsLanAcknowledgement}
+                <label class="review-network-consent">
+                  <input
+                    type="checkbox"
+                    checked={reviewLanAcknowledged}
+                    onchange={(event) => (reviewLanAcknowledged = event.currentTarget.checked)}
+                  />
+                  <span>I trust this private network. Manuscript text will travel across it without HTTPS encryption.</span>
+                </label>
+              {/if}
+            </div>
+
+            {#if !reviewEnabled}
+              <div class="review-consent">
+                <strong>Review is off</strong>
+                <p>Test the server first. Writing, spelling, and autosave continue to work without grammar review.</p>
+                <button disabled={!reviewConnectionReady} onclick={() => setReviewEnabled(true)}>Enable grammar review</button>
+              </div>
+            {:else}
+              <div class="review-actions">
+                <button class="review-primary" disabled={reviewRunning || !reviewConnectionReady} onclick={() => void runGrammarReview()}>
+                  {reviewRunning ? "Checking…" : reviewedContent ? "Check again" : "Check sheet"}
+                </button>
+                <button disabled={reviewRunning} onclick={() => setReviewEnabled(false)}>Turn off</button>
+              </div>
+
+              {#if reviewMessage}
+                <p class:error-text={reviewStale || reviewMessage.startsWith("Cannot") || reviewMessage.includes("returned")} class="review-message" aria-live="polite">{reviewMessage}</p>
+              {/if}
+
+              {#if reviewFindings.length > 0}
+                <div class="review-findings" aria-label="Review suggestions">
+                  {#each reviewFindings as finding}
+                    <section class:stale={reviewStale} class="review-finding">
+                      <div class="review-finding-heading">
+                        <span>{reviewCategory(finding)}</span>
+                        <button disabled={reviewStale} aria-label="Dismiss this suggestion" onclick={() => dismissReviewFinding(finding)}>Dismiss</button>
+                      </div>
+                      <strong>{finding.message}</strong>
+                      {#if finding.context.text}
+                        <p class="review-context">{finding.context.text}</p>
+                      {/if}
+                      {#if finding.replacements.length > 0}
+                        <div class="review-replacements">
+                          {#each finding.replacements.slice(0, 5) as replacement}
+                            <button
+                              disabled={reviewStale}
+                              title={`Replace “${finding.checkedText}” with “${replacement.value}”`}
+                              onclick={() => applyReviewReplacement(finding, replacement.value)}
+                            >{replacement.value || "Remove"}</button>
+                          {/each}
+                        </div>
+                      {/if}
+                    </section>
+                  {/each}
+                </div>
+              {:else if reviewedContent && !reviewRunning && !reviewStale}
+                <div class="review-clear-state">
+                  <span aria-hidden="true">✓</span>
+                  <strong>No remaining suggestions</strong>
+                  <p>You can check again after making more changes.</p>
+                </div>
+              {/if}
+            {/if}
+          </aside>
         {/if}
       </div>
       {/if}

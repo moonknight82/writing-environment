@@ -1,0 +1,5 @@
+services:
+  languagetool:
+    build:
+      context: .
+    image: writing-environment-languagetool:6.6
