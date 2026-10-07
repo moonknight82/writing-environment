@@ -6,7 +6,7 @@ export interface VisualTheme {
   tokens: Record<string, string>;
 }
 
-const systemSans = 'Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+const systemSans = '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", ui-sans-serif, sans-serif';
 const systemSerif = '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif';
 const systemMono = '"SFMono-Regular", Consolas, "Liberation Mono", monospace';
 

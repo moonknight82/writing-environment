@@ -1,5 +1,6 @@
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
+use std::error::Error;
 use std::net::IpAddr;
 use std::time::Duration;
 
@@ -329,7 +330,20 @@ fn connection_error(endpoint: &Url, error: reqwest::Error) -> String {
     if error.is_timeout() {
         format!("The grammar checker at {location} did not respond in time.")
     } else {
-        format!("Cannot reach the grammar checker at {location}: {error}")
+        let mut source = error.source();
+        let mut detail = None;
+        while let Some(cause) = source {
+            detail = Some(cause.to_string());
+            source = cause.source();
+        }
+        match detail.filter(|detail| !detail.is_empty() && detail != &error.to_string()) {
+            Some(detail) => {
+                format!("Cannot reach the grammar checker at {location}: {error} ({detail})")
+            }
+            None => format!(
+                "Cannot reach the grammar checker at {location}: {error} ({error:?})"
+            ),
+        }
     }
 }
 

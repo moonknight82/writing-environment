@@ -1,21 +1,12 @@
-Version 0.8.0 adds optional, on-demand grammar and style review through a
-writer-controlled, self-hosted LanguageTool server. Review supports English and
-Portuguese language variants and stays outside the typing and autosave paths.
-The connection test reads only LanguageTool's language list; manuscript text is
-sent only when the writer explicitly chooses **Check sheet**.
+Version 0.8.1 polishes the desktop interface on macOS and Linux. The library,
+sheet list, editor controls, menus, and dialogs now share clearer spacing,
+typography, selection states, and a consistent icon style. Narrow desktop
+windows give the toolbar and manuscript room without removing controls.
 
-Review findings remain non-destructive. Each suggestion includes its rule or
-category, explanation, context, and available replacements. Markdown syntax,
-front matter, code, and link destinations are masked without shifting source
-offsets. Suggestions become stale when the sheet changes, and a replacement is
-applied only while its reviewed source range still matches the current draft.
-
-Self-hosted deployments may run on the writer's computer, NAS, or another
-private server. Public unencrypted endpoints are rejected, while private-network
-HTTP requires a visible acknowledgement. The repository includes a reproducible
-Docker and Portainer package built from the checksummed official LanguageTool
-6.6 standalone archive for ARM64 and x86-64 hosts. Dependency audits now run in
-continuous integration as an additional release check.
+This release also includes a macOS local-network usage description for a
+self-hosted LanguageTool server and clearer connection errors when that server
+cannot be reached. Grammar checks remain optional and run only when requested;
+the polish does not change manuscript files, autosave, or sync behavior.
 
 This is a personal project under active development. Back up important writing
 and review the release notes before updating.

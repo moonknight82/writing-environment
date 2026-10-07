@@ -37,6 +37,12 @@ updater="$bundle_dir/Writing Environment.app.tar.gz"
   exit 1
 }
 
+local_network_usage="$(plutil -extract NSLocalNetworkUsageDescription raw -o - "$app/Contents/Info.plist")"
+[[ -n "$local_network_usage" ]] || {
+  printf 'The macOS bundle does not declare local-network access for self-hosted LanguageTool.\n' >&2
+  exit 1
+}
+
 ditto -c -k --sequesterRsrc --keepParent "$app" "$output/Writing-Environment-macOS-$version.zip"
 cp "$updater" "$updater.sig" "$output/"
 (

@@ -1,6 +1,7 @@
 import { mount } from "svelte";
 import App from "./App.svelte";
 import "./styles.css";
+import "./polish.css";
 
 const target = document.getElementById("app");
 

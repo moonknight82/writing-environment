@@ -78,6 +78,8 @@ Version 0.7.1 keeps the editor writable while formatted Markdown Preview is acti
 
 Version 0.8.0 adds optional on-demand grammar and style review through a writer-controlled, self-hosted LanguageTool server. The connection test sends no manuscript text, checks run only after an explicit action, private-network HTTP requires a visible acknowledgement, and suggestions are guarded against stale reviewed text. The repository includes a reproducible Docker/Portainer deployment built from the checksummed official LanguageTool 6.6 archive for ARM64 and x86-64 hosts.
 
+Version 0.8.1 polishes the Mac and Linux interface with consistent controls, icons, spacing, and selection states, including a toolbar layout that remains usable at the minimum desktop window width. It also declares macOS local-network access for a self-hosted LanguageTool server and adds detail to connection errors.
+
 Version 0.7.2 supersedes the source-only v0.7.1 tag after a GitHub Actions outage prevented that release from building. Linux x86-64 releases now include a Fedora RPM in addition to the Debian package and portable AppImage.
 
 Update artifacts and `latest.json` are published through [GitHub Releases](https://github.com/moonknight82/writing-environment/releases). Every application update is verified with Tauri's embedded public signing key before installation. The private key is held only in the repository's GitHub Actions secrets. macOS uses a signed Tauri application archive, Linux amd64 publishes Debian and AppImage formats, and Raspberry Pi uses signed Debian packages.

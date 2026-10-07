@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
+  import Icon from "./Icon.svelte";
   import { getVersion } from "@tauri-apps/api/app";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
@@ -4208,7 +4209,7 @@ It passed the abandoned signal house before descending between black pines to th
         title={inboxPath ?? "Universal Inbox"}
         onclick={() => void openInbox()}
       >
-        <span class="nav-icon" aria-hidden="true">▱</span>
+        <span class="nav-icon" aria-hidden="true"><Icon name="inbox" /></span>
         <span>Inbox</span>
         <span class="count">{inboxSheetCount}</span>
       </button>
@@ -4223,7 +4224,7 @@ It passed the abandoned signal house before descending between black pines to th
           aria-label="Open project folder"
           title="Open project folder"
           onclick={openLibraryFolder}
-        >＋</button>
+        ><Icon name="plus" /></button>
       </div>
 
       {#if sidebarProjects.length > 0}
@@ -4248,7 +4249,7 @@ It passed the abandoned signal house before descending between black pines to th
                   onclick={() => void openProject(project)}
                   onkeydown={(event) => openProjectKeyboardMenu(event, project)}
                 >
-                  <span aria-hidden="true">{activeProjectPath === project.path ? "▾" : project.open ? "▱" : "◇"}</span>
+                  <span aria-hidden="true"><Icon name={project.open ? "folderOpen" : "folder"} size={15} /></span>
                   <span>{project.name}</span>
                 </button>
                 <button
@@ -4299,7 +4300,7 @@ It passed the abandoned signal house before descending between black pines to th
                     class="project-tree-row"
                     onclick={() => selectFolder("All Sheets")}
                   >
-                    <span aria-hidden="true">◫</span>
+                    <span aria-hidden="true"><Icon name="files" size={15} /></span>
                     <span>All Sheets</span>
                     <span class="count">{sheets.length}</span>
                   </button>
@@ -4311,7 +4312,7 @@ It passed the abandoned signal house before descending between black pines to th
                       title={folder.path === "Ungrouped" ? "Sheets in the project root" : folder.path}
                       onclick={() => selectFolder(folder.path)}
                     >
-                      <span aria-hidden="true">▱</span>
+                      <span aria-hidden="true"><Icon name="folder" size={15} /></span>
                       <span>{folder.name}</span>
                       <span class="count">{folder.count}</span>
                     </button>
@@ -4333,7 +4334,7 @@ It passed the abandoned signal house before descending between black pines to th
         disabled={loadingLibrary || mutatingLibrary}
         onclick={() => void selectUniversalTrash()}
       >
-        <span class="nav-icon" aria-hidden="true">♲</span>
+        <span class="nav-icon" aria-hidden="true"><Icon name="trash" /></span>
         <span>Trash</span>
         <span class="count">{trashItems.length}</span>
       </button>
@@ -4391,7 +4392,7 @@ It passed the abandoned signal house before descending between black pines to th
               aria-controls={sortMenuVisible ? transientMenuDomId("sort") : undefined}
               title={`Sort sheets: ${sheetSortLabel(sheetSort)}`}
               onclick={(event) => toggleTransientPopover(event, "sort")}
-            >⇅</button>
+            ><Icon name="sort" /></button>
             {#if sortMenuVisible}
               <div id={transientMenuDomId("sort")} class="sheet-sort-menu" role="menu" aria-label="Sort sheets">
                 <p class="eyebrow">Sort sheets</p>
@@ -4421,7 +4422,7 @@ It passed the abandoned signal house before descending between black pines to th
             title={libraryPath ? "Create sheet" : "Open a project to create sheets"}
             disabled={!libraryPath || mutatingLibrary}
             onclick={() => openSheetDialog("create")}
-          >＋</button>
+          ><Icon name="plus" /></button>
         {/if}
       </div>
     </header>
@@ -4449,7 +4450,7 @@ It passed the abandoned signal house before descending between black pines to th
       </div>
     {:else if !trashActive}
       <div class="library-search">
-        <span aria-hidden="true">⌕</span>
+        <span aria-hidden="true"><Icon name="search" size={15} /></span>
         <input
           type="search"
           placeholder="Search Inbox and open projects"
@@ -4547,7 +4548,7 @@ It passed the abandoned signal house before descending between black pines to th
                 aria-expanded={sheetActionsPath === sheet.relativePath}
                 aria-controls={sheetActionsPath === sheet.relativePath ? transientMenuDomId("sheet", sheet.relativePath) : undefined}
                 onclick={(event) => toggleTransientPopover(event, "sheet", sheet.relativePath)}
-              >•••</button>
+              ><Icon name="more" /></button>
               {#if sheetActionsPath === sheet.relativePath}
                 <div id={transientMenuDomId("sheet", sheet.relativePath)} class="sheet-actions-menu" role="menu" aria-label={`Actions for ${sheet.title}`}>
                   <button role="menuitem" onclick={() => toggleSheetFavorite(sheet)}>
@@ -4586,7 +4587,7 @@ It passed the abandoned signal house before descending between black pines to th
           title="Toggle library"
           onclick={() => (libraryVisible = !libraryVisible)}
         >
-          ◧
+          <Icon name="sidebar" />
         </button>
         <button
           class:active={!sheetsVisible}
@@ -4595,7 +4596,7 @@ It passed the abandoned signal house before descending between black pines to th
           title="Toggle sheet list"
           onclick={() => (sheetsVisible = !sheetsVisible)}
         >
-          ▤
+          <Icon name="list" />
         </button>
         <button
           class:active={editorMode === "preview"}
@@ -4631,7 +4632,7 @@ It passed the abandoned signal house before descending between black pines to th
             title="Export document"
             onclick={(event) => toggleTransientPopover(event, "export")}
           >
-            <span class="export-symbol" aria-hidden="true">⇩</span>
+            <span class="export-symbol" aria-hidden="true"><Icon name="download" /></span>
             <span>{exportRunning ? "Exporting…" : "Export"}</span>
           </button>
           {#if exportMenuVisible}
@@ -4805,7 +4806,7 @@ It passed the abandoned signal house before descending between black pines to th
           title="Sheet history"
           onclick={() => void openHistory()}
         >
-          <span class="history-symbol" aria-hidden="true">◷</span>
+          <span class="history-symbol" aria-hidden="true"><Icon name="history" /></span>
           <span>History</span>
         </button>
 
@@ -4820,7 +4821,7 @@ It passed the abandoned signal house before descending between black pines to th
             title={`Universal sync: ${syncStatus}`}
             onclick={openSyncMenu}
           >
-            <span class="sync-symbol" aria-hidden="true">↕</span>
+            <span class="sync-symbol" aria-hidden="true"><Icon name="sync" /></span>
             <span>Sync</span>
             <small>{syncRunning
               ? "Working"
@@ -5230,7 +5231,7 @@ It passed the abandoned signal house before descending between black pines to th
             sheetsVisible = !entering;
           }}
         >
-          ⛶
+          <Icon name="focus" />
         </button>
 
         <button
@@ -5240,7 +5241,7 @@ It passed the abandoned signal house before descending between black pines to th
           title={appFullscreen ? "Exit full screen (F11)" : "Enter full screen (F11)"}
           onclick={() => void toggleAppFullscreen()}
         >
-          ⤢
+          <Icon name="fullscreen" />
         </button>
       </div>
     </header>

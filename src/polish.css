@@ -1,0 +1,238 @@
+/* Shared desktop finish. Keep prose sizing and editor geometry in styles.css. */
+:root {
+  --toolbar-height: 56px;
+  --status-height: 34px;
+  --control-radius: 7px;
+  --menu-radius: 11px;
+  --control-height: 32px;
+  --shadow-popover: 0 12px 32px rgb(0 0 0 / 16%), 0 2px 7px rgb(0 0 0 / 6%);
+}
+
+button, input, select { -webkit-tap-highlight-color: transparent; }
+button { transition: background-color var(--transition), color var(--transition), border-color var(--transition); }
+button:focus-visible, select:focus-visible, input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+svg { display: block; flex: none; }
+
+main { grid-template-columns: 224px 300px minmax(0, 1fr); }
+main.library-hidden { grid-template-columns: 0 300px minmax(0, 1fr); }
+main.sheets-hidden { grid-template-columns: 224px 0 minmax(0, 1fr); }
+main.focus-mode { grid-template-columns: 0 0 minmax(0, 1fr); }
+
+.library { background: color-mix(in srgb, var(--surface) 92%, var(--surface-raised)); }
+.brand {
+  gap: 9px;
+  padding-left: 16px;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+.brand-mark {
+  width: 25px;
+  height: 25px;
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
+  border-radius: 6px;
+  background: var(--surface-raised);
+  font-size: 15px;
+}
+.eyebrow {
+  color: color-mix(in srgb, var(--text-muted) 88%, var(--text));
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .075em;
+}
+.projects-section { padding-top: 15px; }
+.project-open, .nav-row, .project-tree-row { min-height: 32px; }
+.project-open, .project-tree-row { font-size: 12px; }
+.nav-row { font-size: 12px; }
+.nav-icon, .project-tree-row > span:first-child { display: flex; align-items: center; }
+.nav-row.active, .project-tree-row.active, .project-row.active {
+  background: color-mix(in srgb, var(--accent-soft) 82%, transparent);
+}
+.nav-row.active, .project-tree-row.active, .project-row.active .project-open { color: var(--text); }
+.project-row.active, .nav-row.active { box-shadow: inset 2px 0 0 var(--accent); }
+.count { font-size: 10px; font-weight: 550; }
+.add-project, .pin-project { width: 30px; height: 30px; }
+.projects-empty { font-family: var(--interface-font); font-size: 11px; line-height: 1.5; }
+.library-footer { padding: 0 14px; font-size: 10px; }
+
+.sheet-list { background: var(--surface-raised); }
+.panel-header {
+  min-height: 76px;
+  padding: 13px 13px 11px 16px;
+}
+.panel-header h1 { font-size: 18px; font-weight: 650; letter-spacing: -.02em; }
+.panel-header .eyebrow { margin-bottom: 4px; }
+.panel-header-actions { gap: 4px; }
+.selection-start-button, .selection-done-button, .empty-trash-button,
+.sheet-selection-toolbar button { font-size: 11px; }
+.trash-origin-filter { width: 112px; font-size: 11px; padding-left: 6px; }
+.library-search { min-height: 43px; padding: 0 15px; gap: 8px; }
+.library-search input { font-size: 12px; }
+.search-notice, .searching { font-size: 11px; }
+.sheets { padding: 8px 7px 12px; }
+.sheet-card-wrap { border-radius: 7px; }
+.sheet-card-wrap + .sheet-card-wrap { margin-top: 2px; }
+.sheet-card { gap: 5px; padding: 12px 40px 12px 12px; border-radius: 7px; }
+.sheet-card strong { font-size: 12px; font-weight: 650; }
+.excerpt { font-size: 11px; line-height: 1.45; }
+.sheet-meta { font-size: 10px; }
+.sheet-card-wrap.active {
+  background: color-mix(in srgb, var(--accent-soft) 82%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.sheet-card-wrap:hover:not(.active) { background: color-mix(in srgb, var(--accent-soft) 55%, transparent); }
+.sheet-favorite-button, .sheet-actions-button { top: 8px; width: 28px; height: 28px; }
+.sheet-actions-button { display: grid; place-items: center; letter-spacing: 0; }
+.sheet-card-wrap:focus-within .sheet-favorite-button,
+.sheet-card-wrap:focus-within .sheet-actions-button { opacity: 1; }
+.trash-card { border: 1px solid var(--border); background: var(--surface-raised); }
+.trash-card strong { font-size: 12px; }
+.trash-card > span, .trash-card small, .trash-card button { font-size: 10px; }
+
+.editor-toolbar {
+  gap: 10px;
+  padding: 0 12px;
+  background: color-mix(in srgb, var(--canvas) 88%, var(--surface-raised));
+}
+.toolbar-group { gap: 3px; }
+.toolbar-end { min-width: 0; }
+.icon-button { width: var(--control-height); height: var(--control-height); }
+.editor-mode-button {
+  margin-left: 3px;
+  min-height: 30px;
+  padding: 0 10px;
+  border-color: transparent;
+  border-radius: var(--control-radius);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+}
+.editor-mode-button:hover:not(:disabled) { background: var(--accent-soft); color: var(--text); }
+.editor-mode-button.active { border-color: var(--border); color: var(--text); background: var(--surface-raised); }
+.document-title { max-width: 230px; color: var(--text); font-size: 12px; font-weight: 600; }
+.history-button, .export-button, .sync-button { min-height: var(--control-height); font-size: 11px; }
+.history-symbol, .export-symbol, .sync-symbol { display: flex; align-items: center; }
+.editor-status { padding: 0 14px; font-size: 10px; background: color-mix(in srgb, var(--canvas) 92%, var(--surface-raised)); }
+
+.project-context-menu, .sheet-actions-menu, .sheet-sort-menu,
+.theme-menu, .writer-menu, .writing-focus-menu, .session-goal-menu,
+.export-menu, .sync-menu {
+  border-color: color-mix(in srgb, var(--border) 85%, var(--text-muted));
+  border-radius: var(--menu-radius);
+  box-shadow: var(--shadow-popover);
+}
+.project-context-menu, .sheet-actions-menu { width: 196px; }
+.sheet-sort-menu { width: 180px; }
+.project-context-menu button, .sheet-actions-menu button, .sheet-sort-menu strong { font-size: 11px; }
+.theme-menu :is(button, label, input, select),
+.writer-menu :is(button, label, input, select),
+.writing-focus-menu :is(button, label, input, select),
+.session-goal-menu :is(button, label, input, select),
+.export-menu :is(button, label, input, select),
+.sync-menu :is(button, label, input, select) { font-size: 11px; }
+.theme-menu small, .writer-menu small, .writing-focus-menu small,
+.session-goal-menu small, .sync-menu small { font-size: 10px; line-height: 1.4; }
+.theme-menu .eyebrow, .writer-menu .eyebrow, .writing-focus-menu .eyebrow,
+.session-goal-menu .eyebrow, .export-menu .eyebrow, .sync-menu .eyebrow { font-size: 10px; }
+.export-menu strong, .sync-menu-heading strong { font-size: 12px; }
+.export-menu small, .export-option small, .sync-message, .sync-safety-note { font-size: 10px; }
+.export-preset-row label > span, .export-metadata label > span { font-size: 10px; letter-spacing: .04em; }
+.export-preset-row select, .export-metadata input, .export-metadata select,
+.export-preset-editor input, .export-small-button, .export-preset-editor button { height: 32px; font-size: 11px; }
+.export-scope button { font-size: 11px; }
+.export-menu .eyebrow { margin-bottom: 8px; }
+.quick-switcher, .update-dialog, .history-dialog, .sheet-dialog {
+  border-radius: 12px;
+  box-shadow: 0 18px 55px rgb(0 0 0 / 24%), 0 3px 12px rgb(0 0 0 / 10%);
+}
+.quick-switcher-results strong { font-size: 12px; }
+.quick-switcher-results small, .quick-switcher-footer { font-size: 10px; }
+.quick-result-location small { font-size: 10px; }
+.sheet-dialog > label { font-size: 11px; }
+.sheet-dialog :is(input, select, button), .update-dialog button,
+.history-dialog button { font-size: 11px; }
+
+@media (max-width: 1400px) {
+  .editor-toolbar { grid-template-columns: minmax(0, 1fr) auto; }
+  .document-title { display: none; }
+  .history-button, .export-button, .sync-button,
+  .session-goal-button, .writing-focus-button, .theme-button {
+    width: 32px;
+    justify-content: center;
+    padding: 0;
+  }
+  .theme-button { font-size: 0; }
+  .session-goal-button > span:not(.goal-symbol), .session-goal-button small,
+  .writing-focus-button > span:not(.focus-symbol), .writing-focus-button small,
+  .history-button > span:not(.history-symbol),
+  .export-button > span:not(.export-symbol),
+  .sync-button > span:not(.sync-symbol), .sync-button small { display: none; }
+}
+@media (max-width: 1100px) {
+  :root { --toolbar-height: 76px; }
+  .editor-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 32px 32px;
+    justify-items: center;
+    align-content: center;
+    gap: 2px;
+    padding: 4px 8px;
+  }
+  .editor-toolbar > .toolbar-group { min-width: 0; justify-content: center; }
+  .editor-toolbar > .toolbar-end { grid-row: 2; }
+  .editor-stage { width: 100%; }
+  textarea, .focus-overlay, .markdown-preview { padding-right: 32px; padding-left: 32px; }
+  .focus-overlay { padding-right: calc(32px + var(--editor-scrollbar-width, 0px)); }
+}
+@media (max-width: 900px) {
+  main { grid-template-columns: 188px 256px minmax(0, 1fr); }
+  main.library-hidden { grid-template-columns: 0 256px minmax(0, 1fr); }
+  main.sheets-hidden { grid-template-columns: 188px 0 minmax(0, 1fr); }
+  main.focus-mode { grid-template-columns: 0 0 minmax(0, 1fr); }
+  .document-title { max-width: 130px; }
+  textarea, .focus-overlay, .markdown-preview { padding-right: 24px; padding-left: 24px; }
+  .focus-overlay { padding-right: calc(24px + var(--editor-scrollbar-width, 0px)); }
+  .editor-stage.preview-visible .focus-overlay {
+    padding-right: calc(24px + var(--editor-scrollbar-width, 0px));
+    padding-left: 24px;
+  }
+}
+@media (max-width: 800px) {
+  :root { --control-height: 28px; }
+  .editor-toolbar {
+    grid-template-rows: 30px 30px;
+  }
+  .editor-mode-button { min-height: 28px; padding: 0 8px; }
+  .history-button, .export-button, .sync-button,
+  .session-goal-button, .writing-focus-button, .theme-button {
+    width: 28px;
+    min-height: 28px;
+    justify-content: center;
+    padding: 0;
+  }
+  .theme-button { font-size: 0; }
+  .session-goal-button > span:not(.goal-symbol), .session-goal-button small,
+  .writing-focus-button > span:not(.focus-symbol), .writing-focus-button small,
+  .history-button > span:not(.history-symbol),
+  .export-button > span:not(.export-symbol),
+  .sync-button > span:not(.sync-symbol), .sync-button small { display: none; }
+}
+@media (min-width: 681px) and (max-width: 780px) {
+  :root { --toolbar-height: 102px; }
+  .editor-toolbar { grid-template-rows: 30px 58px; }
+  .editor-toolbar > .toolbar-end {
+    display: grid;
+    width: max-content;
+    grid-template-columns: repeat(5, 28px);
+    grid-auto-rows: 28px;
+    justify-items: center;
+    gap: 2px;
+  }
+}
+@media (max-width: 680px) {
+  main, main.library-hidden, main.sheets-hidden { grid-template-columns: 0 0 minmax(0, 1fr); }
+  .editor-toolbar { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+}
